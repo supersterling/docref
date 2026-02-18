@@ -28,25 +28,27 @@ enum Commands {
     Init,
     /// Verify all references are still fresh
     Check,
+    /// Re-hash a stale reference so check passes again
+    Accept {
+        /// Reference in file#symbol format (e.g., src/lib.rs#add)
+        reference: String,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    match cli.command {
-        Commands::Init => match cmd_init() {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            },
-        },
-        Commands::Check => match cmd_check() {
-            Ok(code) => code,
-            Err(e) => {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            },
+    let result = match cli.command {
+        Commands::Init => cmd_init().map(|()| ExitCode::SUCCESS),
+        Commands::Check => cmd_check(),
+        Commands::Accept { reference } => cmd_accept(&reference).map(|()| ExitCode::SUCCESS),
+    };
+
+    match result {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
         },
     }
 }
@@ -115,6 +117,61 @@ fn cmd_check() -> Result<ExitCode, error::Error> {
         println!("All {total} references fresh");
         Ok(ExitCode::SUCCESS)
     }
+}
+
+/// Re-hash a specific reference and update the lockfile.
+///
+/// # Errors
+///
+/// Returns errors from lockfile I/O, resolution, or hashing.
+fn cmd_accept(reference: &str) -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let lock_path = root.join(".docref.lock");
+
+    let (file, symbol) = parse_symbol_ref(reference)?;
+    let mut lockfile = Lockfile::read(&lock_path)?;
+
+    let source = std::fs::read_to_string(root.join(&file))
+        .map_err(|_| error::Error::FileNotFound { path: file.clone() })?;
+    let language = grammar::language_for_path(&file)?;
+    let query = parse_entry_symbol(&symbol);
+    let resolved = resolver::resolve(&file, &source, &language, &query)?;
+    let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
+
+    let mut updated = false;
+    for entry in &mut lockfile.entries {
+        if entry.target == file && entry.symbol == symbol {
+            entry.hash = new_hash.clone();
+            updated = true;
+        }
+    }
+
+    if !updated {
+        return Err(error::Error::SymbolNotFound {
+            file,
+            symbol,
+        });
+    }
+
+    lockfile.write(&lock_path)?;
+    println!("Accepted {}#{symbol}", file.display());
+
+    Ok(())
+}
+
+/// Parse a `file#symbol` string into its components.
+///
+/// # Errors
+///
+/// Returns `Error::ParseFailed` if the string doesn't contain `#`.
+fn parse_symbol_ref(input: &str) -> Result<(PathBuf, String), error::Error> {
+    let Some((file, symbol)) = input.split_once('#') else {
+        return Err(error::Error::ParseFailed {
+            file: PathBuf::from(input),
+            reason: "expected file#symbol format".to_string(),
+        });
+    };
+    Ok((PathBuf::from(file), symbol.to_string()))
 }
 
 /// Result of checking a single lockfile entry.

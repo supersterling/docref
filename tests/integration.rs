@@ -95,3 +95,40 @@ fn check_detects_broken_reference() {
     assert_eq!(code, 2, "expected exit 2 (broken), got {code}\nstdout: {stdout}");
     assert!(stdout.contains("BROKEN"), "output should mention BROKEN: {stdout}");
 }
+
+#[test]
+fn accept_updates_stale_reference() {
+    let (_tmp, dir) = isolated_fixture("basic");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+
+    // Init, then modify source.
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+    let modified = original.replace("const A: i32 = 10;", "const A: i32 = 20;");
+    std::fs::write(&src, &modified).unwrap();
+
+    // Check should be stale.
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert_eq!(check.status.code().unwrap(), 1);
+
+    // Accept the specific reference.
+    let accept = docref_at(&dir)
+        .args(["accept", "src/lib.rs#A"])
+        .output()
+        .unwrap();
+    assert!(
+        accept.status.success(),
+        "accept failed: {}",
+        String::from_utf8_lossy(&accept.stderr)
+    );
+
+    // Check should pass now.
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check still failing after accept: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+}
