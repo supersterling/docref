@@ -189,3 +189,54 @@ fn markdown_heading_references() {
         String::from_utf8_lossy(&check.stderr)
     );
 }
+
+#[test]
+fn reformatting_does_not_break_check() {
+    let (_tmp, dir) = isolated_fixture("basic");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+
+    // Init.
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Reformat: add whitespace around parameters and operators.
+    let reformatted = original
+        .replace("fn add(x: i32) -> i32 {", "fn add( x: i32 ) -> i32 {")
+        .replace("x + A", "x  +  A");
+    std::fs::write(&src, &reformatted).unwrap();
+
+    // Check should STILL pass (whitespace is normalized away).
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "whitespace change broke check: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+}
+
+#[test]
+fn comment_changes_do_not_break_check() {
+    let (_tmp, dir) = isolated_fixture("basic");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+
+    // Init.
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Add a comment above a referenced symbol.
+    let commented =
+        original.replace("const A: i32 = 10;", "// base offset\nconst A: i32 = 10;");
+    std::fs::write(&src, &commented).unwrap();
+
+    // Check should still pass (comments are stripped from hash).
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "comment change broke check: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+}
