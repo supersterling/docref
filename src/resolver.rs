@@ -338,50 +338,88 @@ fn to_resolved(decl: &Declaration) -> ResolvedSymbol {
 // ── Markdown ───────────────────────────────────────────────────────────
 
 /// Walk the tree and collect all headings as declarations (slugified names).
+/// Nested headings get qualified names: a `### Example` under `## Foo` becomes `foo.example`.
+/// The document title (h1) doesn't participate in scoping — the file path provides that context.
 fn collect_md_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
     let mut declarations = Vec::new();
-    collect_md_headings(root, source, &mut declarations);
+    collect_md_sections(root, source, "", &mut declarations);
     declarations
 }
 
-/// Recursively find `atx_heading` nodes and extract slugified heading text.
-fn collect_md_headings(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
-    if node.kind() == "atx_heading" {
-        if let Some(decl) = md_heading_declaration(node, source) {
-            declarations.push(decl);
-        }
-        return;
-    }
-
+/// Recursively walk section nodes, threading the parent heading slug as context.
+/// Each section's heading produces a declaration; child sections inherit the parent's slug.
+fn collect_md_sections(
+    node: Node<'_>,
+    source: &str,
+    parent_slug: &str,
+    declarations: &mut Vec<Declaration>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_md_headings(child, source, declarations);
+        if child.kind() == "section" {
+            collect_section_with_context(child, source, parent_slug, declarations);
+        }
     }
 }
 
-/// Extract a heading declaration. The byte range covers the entire section
-/// (from the heading's parent section node) or just the heading if no section parent.
-fn md_heading_declaration(node: Node<'_>, source: &str) -> Option<Declaration> {
-    let heading_text = extract_heading_text(node, source)?;
-    let slug = slugify(&heading_text);
+/// Process a single section node: extract its heading, build qualified name, recurse into children.
+fn collect_section_with_context(
+    section: Node<'_>,
+    source: &str,
+    parent_slug: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let Some((slug, is_document_title)) = section_heading_slug_and_level(section, source) else {
+        return;
+    };
 
-    if slug.is_empty() {
-        return None;
+    // Document title (h1) gets a bare qualified name; its slug does NOT prefix children.
+    // Scoping starts at h2 and below (the file path already identifies the document).
+    let qualified = if is_document_title || parent_slug.is_empty() {
+        slug.clone()
+    } else {
+        format!("{parent_slug}.{slug}")
+    };
+
+    let start = u32::try_from(section.start_byte()).ok();
+    let end = u32::try_from(section.end_byte()).ok();
+    if let (Some(start), Some(end)) = (start, end) {
+        declarations.push(Declaration {
+            name: slug.clone(),
+            qualified_name: qualified.clone(),
+            byte_range: start..end,
+        });
     }
 
-    // Use the parent section's range if available, otherwise just the heading.
-    let range_node = node
-        .parent()
-        .filter(|p| p.kind() == "section")
-        .unwrap_or(node);
-    let start = u32::try_from(range_node.start_byte()).ok()?;
-    let end = u32::try_from(range_node.end_byte()).ok()?;
+    // h1 children get bare names (no parent scope); h2+ children get qualified scope.
+    let child_scope = if is_document_title { "" } else { &qualified };
+    collect_md_sections(section, source, child_scope, declarations);
+}
 
-    Some(Declaration {
-        qualified_name: slug.clone(),
-        name: slug,
-        byte_range: start..end,
-    })
+/// Extract the slugified heading text and whether this is an h1 (document title).
+fn section_heading_slug_and_level(section: Node<'_>, source: &str) -> Option<(String, bool)> {
+    let mut cursor = section.walk();
+    for child in section.children(&mut cursor) {
+        if child.kind() != "atx_heading" {
+            continue;
+        }
+        let is_h1 = heading_is_document_title(child);
+        let text = extract_heading_text(child, source)?;
+        let slug = slugify(&text);
+        if slug.is_empty() {
+            return None;
+        }
+        return Some((slug, is_h1));
+    }
+    None
+}
+
+/// Check whether a heading is an h1 (document title) by looking for `atx_h1_marker`.
+fn heading_is_document_title(heading: Node<'_>) -> bool {
+    let mut cursor = heading.walk();
+    heading
+        .children(&mut cursor)
+        .any(|c| c.kind() == "atx_h1_marker")
 }
 
 /// Extract raw heading text by reading everything after the heading marker.

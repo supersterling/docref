@@ -311,3 +311,45 @@ fn status_shows_all_references() {
         "missing VERSION: {stdout}"
     );
 }
+
+#[test]
+fn dotpath_resolves_impl_method() {
+    let (_tmp, dir) = isolated_fixture("scoped");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("Config.validate"),
+        "lockfile missing Config.validate: {content}"
+    );
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(check.status.success());
+}
+
+#[test]
+fn dotpath_resolves_scoped_heading() {
+    let (_tmp, dir) = isolated_fixture("scoped");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("foo.example"),
+        "lockfile missing foo.example: {content}"
+    );
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(check.status.success());
+}
