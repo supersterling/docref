@@ -11,7 +11,7 @@ pub struct Config {
 
 /// Raw TOML structure for `.docref.toml`.
 #[derive(serde::Deserialize)]
-struct RawConfig {
+struct DocrefTomlConfig {
     #[serde(default)]
     include: Vec<String>,
     #[serde(default)]
@@ -20,7 +20,7 @@ struct RawConfig {
 
 impl Config {
     /// Load config from `.docref.toml` in the given root directory.
-    /// Returns a permissive default if the file doesn't exist.
+    /// Returns a default that scans everything if the file doesn't exist.
     /// Returns an error if the file exists but is malformed — never silently
     /// falls back to defaults when the user wrote a config file.
     ///
@@ -32,11 +32,11 @@ impl Config {
         let path = root.join(".docref.toml");
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::permissive()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::scan_everything_by_default()),
             Err(e) => return Err(Error::Io(e)),
         };
 
-        let raw: RawConfig = toml::from_str(&content)?;
+        let raw: DocrefTomlConfig = toml::from_str(&content)?;
         Ok(Self {
             include: raw.include,
             exclude: raw.exclude,
@@ -44,7 +44,7 @@ impl Config {
     }
 
     /// Default config that includes everything and excludes nothing.
-    fn permissive() -> Self {
+    fn scan_everything_by_default() -> Self {
         Self {
             include: Vec::new(),
             exclude: Vec::new(),

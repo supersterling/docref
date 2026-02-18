@@ -37,33 +37,33 @@ pub fn scan(root: &Path, config: &Config) -> Result<HashMap<PathBuf, Vec<Referen
         }
 
         let content = std::fs::read_to_string(md_path)?;
-        extract_refs_from_content(&content, &relative_source, &pattern, &mut grouped);
+        extract_references_from_markdown_content(&content, &relative_source, &pattern, &mut grouped);
     }
 
     Ok(grouped)
 }
 
 /// Extract all `[text](path#symbol)` references from markdown content.
-fn extract_refs_from_content(
+fn extract_references_from_markdown_content(
     content: &str,
     source: &Path,
     pattern: &Regex,
     grouped: &mut HashMap<PathBuf, Vec<Reference>>,
 ) {
     for line in content.lines() {
-        extract_refs_from_line(line, source, pattern, grouped);
+        extract_references_from_markdown_line(line, source, pattern, grouped);
     }
 }
 
 /// Extract references from a single markdown line.
-fn extract_refs_from_line(
+fn extract_references_from_markdown_line(
     line: &str,
     source: &Path,
     pattern: &Regex,
     grouped: &mut HashMap<PathBuf, Vec<Reference>>,
 ) {
     for cap in pattern.captures_iter(line) {
-        let Some(reference) = parse_capture(&cap, source) else {
+        let Some(reference) = parse_markdown_link_capture(&cap, source) else {
             continue;
         };
         let target = reference.target.clone();
@@ -73,7 +73,7 @@ fn extract_refs_from_line(
 
 /// Try to parse a regex capture into a local code reference.
 /// Returns `None` for external URLs or empty fragments.
-fn parse_capture(cap: &Captures<'_>, source: &Path) -> Option<Reference> {
+fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path) -> Option<Reference> {
     let raw_target = &cap[2];
     let raw_symbol = &cap[3];
 
@@ -86,7 +86,7 @@ fn parse_capture(cap: &Captures<'_>, source: &Path) -> Option<Reference> {
     }
 
     let target = PathBuf::from(raw_target);
-    let symbol = parse_symbol_query(raw_symbol);
+    let symbol = parse_symbol_fragment_as_query(raw_symbol);
 
     Some(Reference {
         source: source.to_path_buf(),
@@ -96,7 +96,7 @@ fn parse_capture(cap: &Captures<'_>, source: &Path) -> Option<Reference> {
 }
 
 /// Parse a symbol fragment into bare or dot-scoped form.
-fn parse_symbol_query(raw: &str) -> SymbolQuery {
+fn parse_symbol_fragment_as_query(raw: &str) -> SymbolQuery {
     if let Some((parent, child)) = raw.split_once('.') {
         SymbolQuery::Scoped {
             parent: parent.to_string(),

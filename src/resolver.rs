@@ -72,9 +72,9 @@ pub fn resolve(
     let declarations = collect_declarations(tree.root_node(), source, ext);
 
     match query {
-        SymbolQuery::Bare(name) => find_by_name(&declarations, name, file_path),
+        SymbolQuery::Bare(name) => find_declaration_by_bare_name(&declarations, name, file_path),
         SymbolQuery::Scoped { parent, child } => {
-            find_scoped(&declarations, parent, child, file_path)
+            find_declaration_by_qualified_dotpath(&declarations, parent, child, file_path)
         },
     }
 }
@@ -282,7 +282,7 @@ fn ts_variable_declarator(
 /// # Errors
 ///
 /// Returns `Error::SymbolNotFound` if no match, `Error::AmbiguousSymbol` if multiple.
-fn find_by_name(
+fn find_declaration_by_bare_name(
     declarations: &[Declaration],
     name: &str,
     file_path: &Path,
@@ -294,7 +294,7 @@ fn find_by_name(
             file: file_path.to_path_buf(),
             symbol: name.to_string(),
         }),
-        1 => Ok(to_resolved(matches[0])),
+        1 => Ok(declaration_to_resolved_symbol(matches[0])),
         _ => {
             let candidates = matches.iter().map(|d| d.qualified_name.clone()).collect();
             Err(Error::AmbiguousSymbol {
@@ -311,7 +311,7 @@ fn find_by_name(
 /// # Errors
 ///
 /// Returns `Error::SymbolNotFound` if no declaration matches the qualified name.
-fn find_scoped(
+fn find_declaration_by_qualified_dotpath(
     declarations: &[Declaration],
     parent: &str,
     child: &str,
@@ -322,14 +322,14 @@ fn find_scoped(
     declarations
         .iter()
         .find(|d| d.qualified_name == qualified)
-        .map(to_resolved)
+        .map(declaration_to_resolved_symbol)
         .ok_or_else(|| Error::SymbolNotFound {
             file: file_path.to_path_buf(),
             symbol: qualified,
         })
 }
 
-fn to_resolved(decl: &Declaration) -> ResolvedSymbol {
+fn declaration_to_resolved_symbol(decl: &Declaration) -> ResolvedSymbol {
     ResolvedSymbol {
         byte_range: decl.byte_range.clone(),
     }
@@ -342,13 +342,13 @@ fn to_resolved(decl: &Declaration) -> ResolvedSymbol {
 /// The document title (h1) doesn't participate in scoping — the file path provides that context.
 fn collect_md_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
     let mut declarations = Vec::new();
-    collect_md_sections(root, source, "", &mut declarations);
+    walk_markdown_sections_with_scope(root, source, "", &mut declarations);
     declarations
 }
 
 /// Recursively walk section nodes, threading the parent heading slug as context.
 /// Each section's heading produces a declaration; child sections inherit the parent's slug.
-fn collect_md_sections(
+fn walk_markdown_sections_with_scope(
     node: Node<'_>,
     source: &str,
     parent_slug: &str,
@@ -357,19 +357,19 @@ fn collect_md_sections(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "section" {
-            collect_section_with_context(child, source, parent_slug, declarations);
+            extract_declaration_from_markdown_section(child, source, parent_slug, declarations);
         }
     }
 }
 
 /// Process a single section node: extract its heading, build qualified name, recurse into children.
-fn collect_section_with_context(
+fn extract_declaration_from_markdown_section(
     section: Node<'_>,
     source: &str,
     parent_slug: &str,
     declarations: &mut Vec<Declaration>,
 ) {
-    let Some((slug, is_document_title)) = section_heading_slug_and_level(section, source) else {
+    let Some((slug, is_document_title)) = extract_section_slug_and_title_flag(section, source) else {
         return;
     };
 
@@ -393,18 +393,18 @@ fn collect_section_with_context(
 
     // h1 children get bare names (no parent scope); h2+ children get qualified scope.
     let child_scope = if is_document_title { "" } else { &qualified };
-    collect_md_sections(section, source, child_scope, declarations);
+    walk_markdown_sections_with_scope(section, source, child_scope, declarations);
 }
 
 /// Extract the slugified heading text and whether this is an h1 (document title).
-fn section_heading_slug_and_level(section: Node<'_>, source: &str) -> Option<(String, bool)> {
+fn extract_section_slug_and_title_flag(section: Node<'_>, source: &str) -> Option<(String, bool)> {
     let mut cursor = section.walk();
     for child in section.children(&mut cursor) {
         if child.kind() != "atx_heading" {
             continue;
         }
-        let is_h1 = heading_is_document_title(child);
-        let text = extract_heading_text(child, source)?;
+        let is_h1 = heading_has_h1_marker(child);
+        let text = extract_heading_inline_text(child, source)?;
         let slug = slugify(&text);
         if slug.is_empty() {
             return None;
@@ -415,7 +415,7 @@ fn section_heading_slug_and_level(section: Node<'_>, source: &str) -> Option<(St
 }
 
 /// Check whether a heading is an h1 (document title) by looking for `atx_h1_marker`.
-fn heading_is_document_title(heading: Node<'_>) -> bool {
+fn heading_has_h1_marker(heading: Node<'_>) -> bool {
     let mut cursor = heading.walk();
     heading
         .children(&mut cursor)
@@ -423,7 +423,7 @@ fn heading_is_document_title(heading: Node<'_>) -> bool {
 }
 
 /// Extract raw heading text by reading everything after the heading marker.
-fn extract_heading_text(heading: Node<'_>, source: &str) -> Option<String> {
+fn extract_heading_inline_text(heading: Node<'_>, source: &str) -> Option<String> {
     let mut cursor = heading.walk();
     for child in heading.children(&mut cursor) {
         if child.kind() == "heading_content" || child.kind() == "inline" {

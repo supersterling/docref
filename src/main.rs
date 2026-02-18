@@ -89,7 +89,7 @@ fn cmd_init() -> Result<(), error::Error> {
 
     let config = config::Config::load(&root)?;
     let grouped = scanner::scan(&root, &config)?;
-    let entries = resolve_and_hash(&root, &grouped)?;
+    let entries = resolve_and_hash_all_references(&root, &grouped)?;
     let lockfile = Lockfile::new(entries);
 
     lockfile.write(&lock_path)?;
@@ -113,7 +113,7 @@ fn cmd_check() -> Result<ExitCode, error::Error> {
     let mut broken_count = 0u32;
 
     for entry in &lockfile.entries {
-        match check_entry(&root, entry)? {
+        match compare_lockfile_entry_against_source(&root, entry)? {
             CheckResult::Fresh => {},
             CheckResult::Stale => stale_count += 1,
             CheckResult::Broken(reason) => {
@@ -157,7 +157,7 @@ fn cmd_status() -> Result<(), error::Error> {
     let lockfile = Lockfile::read(&lock_path)?;
 
     for entry in &lockfile.entries {
-        let label = match check_entry(&root, entry)? {
+        let label = match compare_lockfile_entry_against_source(&root, entry)? {
             CheckResult::Fresh => "FRESH ",
             CheckResult::Stale => "STALE ",
             CheckResult::Broken(reason) => {
@@ -194,7 +194,7 @@ fn cmd_resolve(file: &str, symbol: Option<&str>) -> Result<(), error::Error> {
             }
         },
         Some(name) => {
-            let query = parse_entry_symbol(name);
+            let query = parse_lockfile_symbol_as_query(name);
             resolver::resolve(&file_path, &source, &language, &query)?;
             println!("{file}#{name}");
         },
@@ -212,13 +212,13 @@ fn cmd_accept(reference: &str) -> Result<(), error::Error> {
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
 
-    let (file, symbol) = parse_symbol_ref(reference)?;
+    let (file, symbol) = split_file_hash_symbol_reference(reference)?;
     let mut lockfile = Lockfile::read(&lock_path)?;
 
     let source = std::fs::read_to_string(root.join(&file))
         .map_err(|_| error::Error::FileNotFound { path: file.clone() })?;
     let language = grammar::language_for_path(&file)?;
-    let query = parse_entry_symbol(&symbol);
+    let query = parse_lockfile_symbol_as_query(&symbol);
     let resolved = resolver::resolve(&file, &source, &language, &query)?;
     let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
 
@@ -287,7 +287,7 @@ fn cmd_accept_file(source_file: &str) -> Result<(), error::Error> {
 
         for &idx in indices {
             let symbol = &lockfile.entries[idx].symbol;
-            let query = parse_entry_symbol(symbol);
+            let query = parse_lockfile_symbol_as_query(symbol);
             let resolved = resolver::resolve(target, &source, &language, &query)?;
             let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
             lockfile.entries[idx].hash = new_hash;
@@ -306,7 +306,7 @@ fn cmd_accept_file(source_file: &str) -> Result<(), error::Error> {
 /// # Errors
 ///
 /// Returns `Error::ParseFailed` if the string doesn't contain `#`.
-fn parse_symbol_ref(input: &str) -> Result<(PathBuf, String), error::Error> {
+fn split_file_hash_symbol_reference(input: &str) -> Result<(PathBuf, String), error::Error> {
     let Some((file, symbol)) = input.split_once('#') else {
         return Err(error::Error::ParseFailed {
             file: PathBuf::from(input),
@@ -328,7 +328,7 @@ enum CheckResult {
 /// # Errors
 ///
 /// Returns errors from resolution or hashing that aren't recoverable as broken/stale.
-fn check_entry(root: &Path, entry: &LockEntry) -> Result<CheckResult, error::Error> {
+fn compare_lockfile_entry_against_source(root: &Path, entry: &LockEntry) -> Result<CheckResult, error::Error> {
     let target_path = root.join(&entry.target);
     let Ok(source) = std::fs::read_to_string(&target_path) else {
         return Ok(CheckResult::Broken("file not found"));
@@ -338,7 +338,7 @@ fn check_entry(root: &Path, entry: &LockEntry) -> Result<CheckResult, error::Err
         return Ok(CheckResult::Broken("unsupported language"));
     };
 
-    let query = parse_entry_symbol(&entry.symbol);
+    let query = parse_lockfile_symbol_as_query(&entry.symbol);
     let resolved = match resolver::resolve(&entry.target, &source, &language, &query) {
         Ok(r) => r,
         Err(error::Error::SymbolNotFound { .. }) => {
@@ -362,7 +362,7 @@ fn check_entry(root: &Path, entry: &LockEntry) -> Result<CheckResult, error::Err
 /// # Errors
 ///
 /// Returns errors from file reading, language detection, resolution, or hashing.
-fn resolve_and_hash(
+fn resolve_and_hash_all_references(
     root: &Path,
     grouped: &HashMap<PathBuf, Vec<Reference>>,
 ) -> Result<Vec<LockEntry>, error::Error> {
@@ -394,7 +394,7 @@ fn resolve_and_hash(
 }
 
 /// Parse a lockfile entry's symbol string back into a query.
-fn parse_entry_symbol(symbol: &str) -> SymbolQuery {
+fn parse_lockfile_symbol_as_query(symbol: &str) -> SymbolQuery {
     if let Some((parent, child)) = symbol.split_once('.') {
         SymbolQuery::Scoped {
             parent: parent.to_string(),

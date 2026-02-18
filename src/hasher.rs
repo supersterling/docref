@@ -35,21 +35,21 @@ pub fn hash_symbol(
         reason: "hash re-parse failed".to_string(),
     })?;
 
-    let normalized = normalize_node(tree.root_node(), snippet);
+    let normalized = normalize_symbol_to_semantic_tokens(tree.root_node(), snippet);
     let hash = Sha256::digest(normalized.as_bytes());
 
     Ok(SemanticHash(format!("{hash:x}")))
 }
 
 /// Walk leaf nodes, skip comments and whitespace, join with single space.
-fn normalize_node(node: Node<'_>, source: &str) -> String {
+fn normalize_symbol_to_semantic_tokens(node: Node<'_>, source: &str) -> String {
     let mut tokens = Vec::new();
-    collect_tokens(node, source, &mut tokens);
+    collect_semantic_leaf_tokens(node, source, &mut tokens);
     tokens.join(" ")
 }
 
 /// Recursively collect non-comment, non-whitespace leaf token text.
-fn collect_tokens<'a>(node: Node<'a>, source: &'a str, tokens: &mut Vec<&'a str>) {
+fn collect_semantic_leaf_tokens<'a>(node: Node<'a>, source: &'a str, tokens: &mut Vec<&'a str>) {
     if node.child_count() == 0 {
         let kind = node.kind();
 
@@ -68,6 +68,6 @@ fn collect_tokens<'a>(node: Node<'a>, source: &'a str, tokens: &mut Vec<&'a str>
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_tokens(child, source, tokens);
+        collect_semantic_leaf_tokens(child, source, tokens);
     }
 }

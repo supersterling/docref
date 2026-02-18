@@ -54,7 +54,7 @@ impl Lockfile {
     /// or `Error::LockfileCorrupt` if entries are not sorted.
     pub fn parse(content: &str) -> Result<Self, Error> {
         let lockfile: Self = toml::from_str(content)?;
-        validate_sorted(&lockfile.entries)?;
+        enforce_lockfile_entry_ordering(&lockfile.entries)?;
         Ok(lockfile)
     }
 
@@ -97,7 +97,7 @@ impl Lockfile {
 /// # Errors
 ///
 /// Returns `Error::LockfileCorrupt` if any adjacent pair is out of order.
-fn validate_sorted(entries: &[LockEntry]) -> Result<(), Error> {
+fn enforce_lockfile_entry_ordering(entries: &[LockEntry]) -> Result<(), Error> {
     for window in entries.windows(2) {
         if window[0] >= window[1] {
             return Err(Error::LockfileCorrupt {
