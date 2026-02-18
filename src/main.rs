@@ -47,6 +47,17 @@ enum Commands {
     },
     /// Show all tracked references and their current freshness
     Status,
+    /// Manage namespace mappings
+    Namespace {
+        #[command(subcommand)]
+        action: NamespaceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum NamespaceAction {
+    /// List all configured namespaces
+    List,
 }
 
 fn main() -> ExitCode {
@@ -67,6 +78,9 @@ fn main() -> ExitCode {
             cmd_resolve(&file, symbol.as_deref()).map(|()| ExitCode::SUCCESS)
         },
         Commands::Status => cmd_status().map(|()| ExitCode::SUCCESS),
+        Commands::Namespace { action } => match action {
+            NamespaceAction::List => cmd_namespace_list().map(|()| ExitCode::SUCCESS),
+        },
     };
 
     match result {
@@ -406,6 +420,27 @@ fn resolve_and_hash_all_references(
     }
 
     Ok(entries)
+}
+
+/// List all configured namespaces.
+///
+/// # Errors
+///
+/// Returns errors from config loading.
+fn cmd_namespace_list() -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let config = config::Config::load(&root)?;
+
+    if config.namespaces.is_empty() {
+        println!("No namespaces configured.");
+        return Ok(());
+    }
+
+    for (name, entry) in &config.namespaces {
+        println!("{name} -> {}", entry.path);
+    }
+
+    Ok(())
 }
 
 /// Parse a lockfile entry's symbol string back into a query.

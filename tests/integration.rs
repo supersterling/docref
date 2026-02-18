@@ -484,6 +484,26 @@ fn extends_inherits_parent_namespaces() {
 }
 
 #[test]
+fn namespace_list_shows_configured_namespaces() {
+    let (_tmp, dir) = isolated_fixture("namespaced");
+
+    let output = docref_at(&dir)
+        .args(["namespace", "list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("auth"),
+        "should list auth namespace: {stdout}"
+    );
+    assert!(
+        stdout.contains("services/auth"),
+        "should show namespace path: {stdout}"
+    );
+}
+
+#[test]
 fn accept_file_updates_all_refs_in_doc() {
     let (_tmp, dir) = isolated_fixture("basic");
     let src = dir.join("src/lib.rs");
