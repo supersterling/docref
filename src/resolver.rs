@@ -74,6 +74,7 @@ fn collect_declarations(root: Node<'_>, source: &str, ext: &str) -> Vec<Declarat
     match ext {
         "rs" => collect_rust_declarations(root, source),
         "ts" | "tsx" => collect_ts_declarations(root, source),
+        "md" | "markdown" => collect_md_declarations(root, source),
         _ => Vec::new(),
     }
 }
@@ -296,5 +297,125 @@ fn find_scoped(
 fn to_resolved(decl: &Declaration) -> ResolvedSymbol {
     ResolvedSymbol {
         byte_range: decl.byte_range.clone(),
+    }
+}
+
+// ── Markdown ───────────────────────────────────────────────────────────
+
+/// Walk the tree and collect all headings as declarations (slugified names).
+fn collect_md_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
+    let mut declarations = Vec::new();
+    collect_md_headings(root, source, &mut declarations);
+    declarations
+}
+
+/// Recursively find `atx_heading` nodes and extract slugified heading text.
+fn collect_md_headings(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    if node.kind() == "atx_heading" {
+        if let Some(decl) = md_heading_declaration(node, source) {
+            declarations.push(decl);
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_md_headings(child, source, declarations);
+    }
+}
+
+/// Extract a heading declaration. The byte range covers the entire section
+/// (from the heading's parent section node) or just the heading if no section parent.
+fn md_heading_declaration(node: Node<'_>, source: &str) -> Option<Declaration> {
+    let heading_text = extract_heading_text(node, source)?;
+    let slug = slugify(&heading_text);
+
+    if slug.is_empty() {
+        return None;
+    }
+
+    // Use the parent section's range if available, otherwise just the heading.
+    let range_node = node
+        .parent()
+        .filter(|p| p.kind() == "section")
+        .unwrap_or(node);
+    let start = u32::try_from(range_node.start_byte()).ok()?;
+    let end = u32::try_from(range_node.end_byte()).ok()?;
+
+    Some(Declaration {
+        qualified_name: slug.clone(),
+        name: slug,
+        byte_range: start..end,
+    })
+}
+
+/// Extract raw heading text by reading everything after the heading marker.
+fn extract_heading_text(heading: Node<'_>, source: &str) -> Option<String> {
+    let mut cursor = heading.walk();
+    for child in heading.children(&mut cursor) {
+        if child.kind() == "heading_content" || child.kind() == "inline" {
+            return child.utf8_text(source.as_bytes()).ok().map(String::from);
+        }
+    }
+    // Fallback: take the full heading text and strip the leading #s.
+    let text = heading.utf8_text(source.as_bytes()).ok()?;
+    let stripped = text.trim_start_matches('#').trim();
+    Some(stripped.to_string())
+}
+
+/// Convert heading text to a URL-compatible slug.
+/// Lowercase, spaces/non-alphanumeric to hyphens, collapse runs, trim edges.
+fn slugify(text: &str) -> String {
+    let lowered = text.to_lowercase();
+    let mut result = String::with_capacity(lowered.len());
+    let mut prev_hyphen = true; // Start true to trim leading hyphens.
+
+    for c in lowered.chars() {
+        if c.is_alphanumeric() {
+            result.push(c);
+            prev_hyphen = false;
+            continue;
+        }
+        if prev_hyphen {
+            continue;
+        }
+        result.push('-');
+        prev_hyphen = true;
+    }
+
+    // Trim trailing hyphen.
+    if result.ends_with('-') {
+        result.pop();
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slugify;
+
+    #[test]
+    fn simple_heading() {
+        assert_eq!(slugify("Architecture"), "architecture");
+    }
+
+    #[test]
+    fn multi_word() {
+        assert_eq!(slugify("Getting Started"), "getting-started");
+    }
+
+    #[test]
+    fn special_chars() {
+        assert_eq!(slugify("What's New?"), "what-s-new");
+    }
+
+    #[test]
+    fn consecutive_spaces() {
+        assert_eq!(slugify("  Hello   World  "), "hello-world");
+    }
+
+    #[test]
+    fn empty_string() {
+        assert_eq!(slugify(""), "");
     }
 }

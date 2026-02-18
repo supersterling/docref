@@ -158,3 +158,34 @@ fn typescript_references_resolve_and_check() {
         String::from_utf8_lossy(&check.stderr)
     );
 }
+
+#[test]
+fn markdown_heading_references() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Lockfile should contain the markdown-to-markdown ref.
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("overview.md"),
+        "lockfile missing markdown ref: {content}"
+    );
+    assert!(
+        content.contains("architecture"),
+        "lockfile missing heading symbol: {content}"
+    );
+
+    // Check passes.
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
