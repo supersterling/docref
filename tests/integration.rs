@@ -376,3 +376,25 @@ fn ambiguous_bare_symbol_errors_with_candidates() {
         "should suggest qualified candidates: {stderr}"
     );
 }
+
+#[test]
+fn config_excludes_directories() {
+    let (_tmp, dir) = isolated_fixture("configured");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("guide.md"),
+        "should include guide.md: {content}"
+    );
+    assert!(
+        !content.contains("ignored.md"),
+        "should exclude docs/external/: {content}"
+    );
+}

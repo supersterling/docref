@@ -4,10 +4,12 @@ use std::path::{Path, PathBuf};
 use regex::{Captures, Regex};
 use walkdir::WalkDir;
 
+use crate::config::Config;
 use crate::error::Error;
 use crate::types::{Reference, SymbolQuery};
 
 /// Scan all markdown files under `root` and extract references.
+/// Applies the config's include/exclude filters to control which markdown files are scanned.
 /// Returns references grouped by target file path for batch resolution.
 ///
 /// # Errors
@@ -17,7 +19,7 @@ use crate::types::{Reference, SymbolQuery};
 /// # Panics
 ///
 /// Panics if the hardcoded reference regex is invalid (compile-time invariant).
-pub fn scan(root: &Path) -> Result<HashMap<PathBuf, Vec<Reference>>, Error> {
+pub fn scan(root: &Path, config: &Config) -> Result<HashMap<PathBuf, Vec<Reference>>, Error> {
     let pattern = Regex::new(r"\[([^\]]+)\]\(([^)#]+)#([^)]+)\)").expect("valid regex");
     let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
 
@@ -27,9 +29,14 @@ pub fn scan(root: &Path) -> Result<HashMap<PathBuf, Vec<Reference>>, Error> {
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
     {
         let md_path = entry.path();
-        let content = std::fs::read_to_string(md_path)?;
         let relative_source = md_path.strip_prefix(root).unwrap_or(md_path).to_path_buf();
 
+        let relative_str = relative_source.to_string_lossy();
+        if !config.should_scan(&relative_str) {
+            continue;
+        }
+
+        let content = std::fs::read_to_string(md_path)?;
         extract_refs_from_content(&content, &relative_source, &pattern, &mut grouped);
     }
 

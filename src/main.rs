@@ -1,3 +1,4 @@
+mod config;
 mod error;
 mod grammar;
 mod hasher;
@@ -75,7 +76,8 @@ fn cmd_init() -> Result<(), error::Error> {
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
 
-    let grouped = scanner::scan(&root)?;
+    let config = config::Config::load(&root)?;
+    let grouped = scanner::scan(&root, &config)?;
     let entries = resolve_and_hash(&root, &grouped)?;
     let lockfile = Lockfile::new(entries);
 
