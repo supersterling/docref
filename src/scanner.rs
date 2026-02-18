@@ -72,18 +72,32 @@ fn extract_references_from_markdown_line(
 }
 
 /// Collapse `.` and `..` components in a path without touching the filesystem.
+/// Preserves leading `..` when there is nothing left to pop.
 fn normalize_path(path: &Path) -> PathBuf {
-    let mut components = Vec::new();
+    let mut components: Vec<std::path::Component<'_>> = Vec::new();
     for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                components.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => components.push(other),
-        }
+        push_normalized_component(&mut components, component);
     }
     components.iter().collect()
+}
+
+/// Handle a single path component during normalization.
+/// Pops the last component for `..` when possible, preserves it otherwise.
+fn push_normalized_component<'a>(
+    components: &mut Vec<std::path::Component<'a>>,
+    component: std::path::Component<'a>,
+) {
+    match component {
+        std::path::Component::CurDir => {}
+        std::path::Component::ParentDir => {
+            let can_pop = matches!(
+                components.last(),
+                Some(c) if !matches!(c, std::path::Component::ParentDir)
+            );
+            if can_pop { components.pop(); } else { components.push(component); }
+        }
+        other => components.push(other),
+    }
 }
 
 /// Try to parse a regex capture into a local code reference.

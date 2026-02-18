@@ -3,6 +3,7 @@ mod error;
 mod grammar;
 mod hasher;
 mod lockfile;
+mod namespace;
 mod resolver;
 mod scanner;
 mod types;
@@ -101,15 +102,15 @@ fn main() -> ExitCode {
         },
         Commands::Status => cmd_status().map(|()| ExitCode::SUCCESS),
         Commands::Namespace { action } => match action {
-            NamespaceAction::List => cmd_namespace_list().map(|()| ExitCode::SUCCESS),
+            NamespaceAction::List => namespace::cmd_list().map(|()| ExitCode::SUCCESS),
             NamespaceAction::Add { name, path } => {
-                cmd_namespace_add(&name, &path).map(|()| ExitCode::SUCCESS)
+                namespace::cmd_add(&name, &path).map(|()| ExitCode::SUCCESS)
             },
             NamespaceAction::Rename { old, new } => {
-                cmd_namespace_rename(&old, &new).map(|()| ExitCode::SUCCESS)
+                namespace::cmd_rename(&old, &new).map(|()| ExitCode::SUCCESS)
             },
             NamespaceAction::Remove { name, force } => {
-                cmd_namespace_remove(&name, force).map(|()| ExitCode::SUCCESS)
+                namespace::cmd_remove(&name, force).map(|()| ExitCode::SUCCESS)
             },
         },
     };
@@ -451,164 +452,6 @@ fn resolve_and_hash_all_references(
     }
 
     Ok(entries)
-}
-
-/// Rename a namespace across config, lockfile, and markdown files.
-///
-/// # Errors
-///
-/// Returns errors from config or lockfile operations, or markdown rewriting.
-fn cmd_namespace_rename(old: &str, new: &str) -> Result<(), error::Error> {
-    let root = PathBuf::from(".");
-    let lock_path = root.join(".docref.lock");
-
-    config::rename_namespace(&root, old, new)?;
-
-    if lock_path.exists() {
-        let lockfile = Lockfile::read(&lock_path)?;
-        let entries = rename_namespace_in_lock_entries(lockfile.entries, old, new);
-        let lockfile = Lockfile::new(entries);
-        lockfile.write(&lock_path)?;
-    }
-
-    let config = config::Config::load(&root)?;
-    rewrite_namespace_in_markdown_files(&root, &config, old, new)?;
-
-    println!("Renamed namespace: {old} -> {new}");
-    Ok(())
-}
-
-/// Remove a namespace from config and lockfile. Refuses if references
-/// exist unless `force` is set.
-///
-/// # Errors
-///
-/// Returns `Error::UnknownNamespace` if references exist (with hint),
-/// or errors from config/lockfile operations.
-fn cmd_namespace_remove(name: &str, force: bool) -> Result<(), error::Error> {
-    let root = PathBuf::from(".");
-    let lock_path = root.join(".docref.lock");
-
-    let prefix = format!("{name}:");
-    if lock_path.exists() && !force {
-        let lockfile = Lockfile::read(&lock_path)?;
-        let count = lockfile
-            .entries
-            .iter()
-            .filter(|e| e.target.to_string_lossy().starts_with(&prefix))
-            .count();
-
-        if count > 0 {
-            return Err(error::Error::UnknownNamespace {
-                name: format!("{name} (in use by {count} references, use --force to remove)"),
-            });
-        }
-    }
-
-    config::remove_namespace(&root, name)?;
-
-    if lock_path.exists() {
-        let lockfile = Lockfile::read(&lock_path)?;
-        let remaining: Vec<LockEntry> = lockfile
-            .entries
-            .into_iter()
-            .filter(|e| !e.target.to_string_lossy().starts_with(&prefix))
-            .collect();
-        let lockfile = Lockfile::new(remaining);
-        lockfile.write(&lock_path)?;
-    }
-
-    println!("Removed namespace: {name}");
-    Ok(())
-}
-
-/// Replace a namespace prefix in all lock entry targets.
-fn rename_namespace_in_lock_entries(
-    entries: Vec<LockEntry>,
-    old: &str,
-    new: &str,
-) -> Vec<LockEntry> {
-    let old_prefix = format!("{old}:");
-    let new_prefix = format!("{new}:");
-
-    entries
-        .into_iter()
-        .map(|mut e| {
-            let target_str = e.target.to_string_lossy().to_string();
-            if let Some(rest) = target_str.strip_prefix(&old_prefix) {
-                e.target = PathBuf::from(format!("{new_prefix}{rest}"));
-            }
-            e
-        })
-        .collect()
-}
-
-/// Rewrite namespace prefixes in markdown link targets across all scanned files.
-///
-/// # Errors
-///
-/// Returns `Error::Io` on file read/write failures.
-fn rewrite_namespace_in_markdown_files(
-    root: &Path,
-    config: &config::Config,
-    old: &str,
-    new: &str,
-) -> Result<(), error::Error> {
-    let old_prefix = format!("({old}:");
-    let new_prefix = format!("({new}:");
-
-    for entry in walkdir::WalkDir::new(root)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-    {
-        let md_path = entry.path();
-        let relative = md_path.strip_prefix(root).unwrap_or(md_path);
-        if !config.should_scan(&relative.to_string_lossy()) {
-            continue;
-        }
-
-        let content = std::fs::read_to_string(md_path)?;
-        if content.contains(&old_prefix) {
-            let updated = content.replace(&old_prefix, &new_prefix);
-            std::fs::write(md_path, updated)?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Add a namespace mapping to the config file.
-///
-/// # Errors
-///
-/// Returns errors from config writing.
-fn cmd_namespace_add(name: &str, path: &str) -> Result<(), error::Error> {
-    let root = PathBuf::from(".");
-    config::add_namespace(&root, name, path)?;
-    println!("Added namespace: {name} -> {path}");
-    Ok(())
-}
-
-/// List all configured namespaces.
-///
-/// # Errors
-///
-/// Returns errors from config loading.
-fn cmd_namespace_list() -> Result<(), error::Error> {
-    let root = PathBuf::from(".");
-    let config = config::Config::load(&root)?;
-
-    if config.namespaces.is_empty() {
-        println!("No namespaces configured.");
-        return Ok(());
-    }
-
-    for (name, entry) in &config.namespaces {
-        println!("{name} -> {}", entry.path);
-    }
-
-    Ok(())
 }
 
 /// Parse a lockfile entry's symbol string back into a query.

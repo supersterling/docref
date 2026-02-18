@@ -49,6 +49,12 @@ pub enum Error {
         name: String,
     },
 
+    #[error("namespace `{name}` is in use by {count} references (use --force to remove)")]
+    NamespaceInUse {
+        name: String,
+        count: usize,
+    },
+
     #[error("config not found: {}", path.display())]
     ConfigNotFound {
         path: PathBuf,
