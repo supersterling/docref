@@ -44,6 +44,21 @@ pub enum Error {
         max_bytes: u64,
     },
 
+    #[error("unknown namespace: `{name}`")]
+    UnknownNamespace {
+        name: String,
+    },
+
+    #[error("config not found: {}", path.display())]
+    ConfigNotFound {
+        path: PathBuf,
+    },
+
+    #[error("config cycle detected: {}", chain.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" -> "))]
+    ConfigCycle {
+        chain: Vec<PathBuf>,
+    },
+
     #[error("lockfile corrupt: {reason}")]
     LockfileCorrupt {
         reason: String,
