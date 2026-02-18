@@ -1,0 +1,24 @@
+# Clippy Configuration for docref
+# Only non-default settings are configured here.
+# All other rules use Clippy defaults.
+
+# Enforce consistent format string style (no mixing {x} and {} styles)
+allow-mixed-uninlined-format-args = false
+
+# Require documentation on private items too
+check-private-items = true
+
+# Strict complexity limit - encourages breaking down complex functions
+cognitive-complexity-threshold = 10
+
+# Strict nesting limit - forces function extraction at 3 levels
+excessive-nesting-threshold = 3
+
+# Alphabetically sort all items within their groupings
+module-items-ordered-within-groupings = "all"
+
+# Strict function length - encourages focused, single-purpose functions
+too-many-lines-threshold = 40
+
+# Aggressive acronym linting - HTTP -> Http, XML -> Xml, etc.
+upper-case-acronyms-aggressive = true

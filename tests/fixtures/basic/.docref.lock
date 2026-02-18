@@ -1,0 +1,11 @@
+[[entries]]
+source = "docs/guide.md"
+target = "src/lib.rs"
+symbol = "A"
+hash = "baa2f52695c8b17bea800b27ea3711502ecc320dba284edb8474f9140084b306"
+
+[[entries]]
+source = "docs/guide.md"
+target = "src/lib.rs"
+symbol = "add"
+hash = "493a0a53f6200285f6894f3d66c12bf397289550cc420e1a1fe01a54bceae805"

@@ -1,0 +1,1515 @@
+# ============================================================================
+# Rustfmt Configuration for docref
+# All values explicitly set to prevent future default changes
+# ============================================================================
+# Each rule includes:
+# - Description
+# - Options/Values
+# - Code examples
+# - Current setting
+# ============================================================================
+
+# ============================================================================
+# REQUIRED: Enable unstable features
+# ============================================================================
+# Many rustfmt options are marked "unstable" and only work with nightly rustfmt
+# Setting this to true allows all unstable options to work
+# Default: false
+unstable_features = true
+
+# ============================================================================
+# CORE SETTINGS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# edition
+# ----------------------------------------------------------------------------
+# OMITTED: Should inherit from Cargo.toml, not override
+# Default: "2015"
+# Stable: Yes
+
+# ----------------------------------------------------------------------------
+# style_edition
+# ----------------------------------------------------------------------------
+# OMITTED: Should follow Rust style guide evolution, not lock to specific edition
+# Default: "2015"
+# Stable: No
+
+# ----------------------------------------------------------------------------
+# max_width
+# ----------------------------------------------------------------------------
+# Maximum width of each line
+# Values: any positive integer
+# Default: 100
+# Stable: Yes
+#
+# Example with max_width = 120:
+# fn main() {
+#     let lorem = "ipsum dolor sit amet consectetur adipiscing elit lorem ipsum dolor sit amet consectetur";
+# }
+#
+# Example with max_width = 80:
+# fn main() {
+#     let lorem = "ipsum dolor sit amet consectetur adipiscing elit lorem ipsum";
+# }
+max_width = 120
+
+# ----------------------------------------------------------------------------
+# hard_tabs
+# ----------------------------------------------------------------------------
+# Use tab characters for indentation instead of spaces
+# Values: true, false
+# Default: false
+# Stable: Yes
+#
+# false (spaces):
+# fn lorem() {
+#     42 // spaces before 42
+# }
+#
+# true (tabs):
+# fn lorem() {
+# →42 // tabs before 42
+# }
+hard_tabs = false
+
+# ----------------------------------------------------------------------------
+# tab_spaces
+# ----------------------------------------------------------------------------
+# Number of spaces per tab
+# Values: any positive integer
+# Default: 4
+# Stable: Yes
+#
+# Only matters when hard_tabs = false
+#
+# tab_spaces = 4:
+# fn lorem() {
+#     let ipsum = dolor();
+# }
+#
+# tab_spaces = 2:
+# fn lorem() {
+#   let ipsum = dolor();
+# }
+tab_spaces = 4
+
+# ----------------------------------------------------------------------------
+# newline_style
+# ----------------------------------------------------------------------------
+# OMITTED: Default "Auto" adapts to git/system settings automatically
+# Default: "Auto"
+# Stable: Yes
+
+# ============================================================================
+# CODE ORGANIZATION
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# reorder_imports
+# ----------------------------------------------------------------------------
+# Alphabetize import statements within groups (separated by blank lines)
+# Values: true, false
+# Default: true
+# Stable: Yes
+#
+# true:
+# use dolor;
+# use ipsum;
+# use lorem;
+# use sit;
+#
+# false:
+# use lorem;
+# use ipsum;
+# use dolor;
+# use sit;
+reorder_imports = true
+
+# ----------------------------------------------------------------------------
+# reorder_modules
+# ----------------------------------------------------------------------------
+# Alphabetize mod declarations within groups
+# Values: true, false
+# Default: true
+# Stable: Yes
+#
+# true:
+# mod a;
+# mod b;
+#
+# mod dolor;
+# mod ipsum;
+#
+# false:
+# mod b;
+# mod a;
+#
+# mod lorem;
+# mod ipsum;
+reorder_modules = true
+
+# ----------------------------------------------------------------------------
+# group_imports
+# ----------------------------------------------------------------------------
+# How to group consecutive imports into sections
+# Values: "Preserve", "StdExternalCrate", "One"
+# Default: "Preserve"
+# Stable: No
+#
+# "Preserve": Keep as written
+# use super::update;
+# use chrono::Utc;
+#
+# use std::sync::Arc;
+#
+# "StdExternalCrate": 3 groups - std/core/alloc, external, self/super/crate
+# use core::f32;
+# use std::sync::Arc;
+#
+# use chrono::Utc;
+#
+# use super::update;
+# use crate::models::Event;
+#
+# "One": Single group
+# use crate::models::Event;
+# use chrono::Utc;
+# use std::sync::Arc;
+# use super::update;
+group_imports = "StdExternalCrate"
+
+# ----------------------------------------------------------------------------
+# imports_granularity
+# ----------------------------------------------------------------------------
+# How to merge/split imports
+# Values: "Preserve", "Crate", "Module", "Item", "One"
+# Default: "Preserve"
+# Stable: No
+#
+# "Preserve": Keep as written
+# use foo::b;
+# use foo::b::{f, g};
+# use foo::{a, c};
+#
+# "Crate": Merge by crate
+# use foo::{
+#     a, b,
+#     b::{f, g},
+#     c,
+# };
+#
+# "Module": Merge by module
+# use foo::b::{f, g};
+# use foo::{a, b, c};
+#
+# "Item": Flatten completely
+# use foo::a;
+# use foo::b;
+# use foo::b::f;
+# use foo::b::g;
+imports_granularity = "Module"
+
+# ----------------------------------------------------------------------------
+# imports_indent
+# ----------------------------------------------------------------------------
+# Indentation style for multi-line imports
+# Values: "Block", "Visual"
+# Default: "Block"
+# Stable: No
+#
+# "Block":
+# use foo::{
+#     xxx, yyy,
+#     zzz,
+# };
+#
+# "Visual":
+# use foo::{xxx, yyy,
+#           zzz};
+imports_indent = "Block"
+
+# ----------------------------------------------------------------------------
+# imports_layout
+# ----------------------------------------------------------------------------
+# Item layout inside import blocks
+# Values: "Mixed", "Horizontal", "HorizontalVertical", "Vertical"
+# Default: "Mixed"
+# Stable: No
+#
+# "Mixed": Break when needed
+# use foo::{xxx, yyy, zzz};
+# use foo::{
+#     aaa, bbb, ccc, ddd,
+#     eee, fff,
+# };
+#
+# "Vertical": Always break
+# use foo::{
+#     xxx,
+#     yyy,
+#     zzz,
+# };
+imports_layout = "Vertical"
+
+# ----------------------------------------------------------------------------
+# reorder_impl_items
+# ----------------------------------------------------------------------------
+# Reorder impl items with type and const first, then macros and methods
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false (keeps original order):
+# impl Iterator for Dummy {
+#     fn next(&mut self) -> Option<Self::Item> {
+#         None
+#     }
+#
+#     type Item = i32;
+# }
+#
+# true (types/consts first):
+# impl Iterator for Dummy {
+#     type Item = i32;
+#
+#     fn next(&mut self) -> Option<Self::Item> {
+#         None
+#     }
+# }
+reorder_impl_items = true
+
+# ============================================================================
+# FORMATTING STYLE
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# indent_style
+# ----------------------------------------------------------------------------
+# Indentation style for expressions
+# Values: "Block", "Visual"
+# Default: "Block"
+# Stable: No
+#
+# "Block":
+# fn main() {
+#     let lorem = vec![
+#         "ipsum",
+#         "dolor",
+#     ];
+# }
+#
+# "Visual" (aligns to opening delimiter):
+# fn main() {
+#     let lorem = vec!["ipsum",
+#                      "dolor"];
+# }
+indent_style = "Block"
+
+# ----------------------------------------------------------------------------
+# brace_style
+# ----------------------------------------------------------------------------
+# Brace placement for items (functions, structs, etc.)
+# Values: "AlwaysNextLine", "PreferSameLine", "SameLineWhere"
+# Default: "SameLineWhere"
+# Stable: No
+#
+# "SameLineWhere":
+# fn lorem() {
+#     // body
+# }
+#
+# fn lorem<T>(ipsum: T)
+# where
+#     T: Add,
+# {
+#     // body
+# }
+#
+# "AlwaysNextLine":
+# fn lorem()
+# {
+#     // body
+# }
+brace_style = "SameLineWhere"
+
+# ----------------------------------------------------------------------------
+# control_brace_style
+# ----------------------------------------------------------------------------
+# Brace style for control flow (if, match, loops)
+# Values: "AlwaysNextLine", "AlwaysSameLine", "ClosingNextLine"
+# Default: "AlwaysSameLine"
+# Stable: No
+#
+# "AlwaysSameLine":
+# if lorem {
+#     println!("ipsum!");
+# } else {
+#     println!("dolor!");
+# }
+#
+# "AlwaysNextLine":
+# if lorem
+# {
+#     println!("ipsum!");
+# }
+# else
+# {
+#     println!("dolor!");
+# }
+#
+# "ClosingNextLine":
+# if lorem {
+#     println!("ipsum!");
+# }
+# else {
+#     println!("dolor!");
+# }
+control_brace_style = "AlwaysSameLine"
+
+# ----------------------------------------------------------------------------
+# trailing_comma
+# ----------------------------------------------------------------------------
+# How to handle trailing commas in lists
+# Values: "Always", "Never", "Vertical"
+# Default: "Vertical"
+# Stable: No
+#
+# "Vertical" (only on multi-line):
+# let Lorem { ipsum, dolor, sit } = amet;
+# let Lorem {
+#     ipsum,
+#     dolor,
+#     sit,
+# } = elit;
+#
+# "Always" (even on single-line):
+# let Lorem { ipsum, dolor, sit, } = amet;
+#
+# "Never" (no trailing commas):
+# let Lorem {
+#     ipsum,
+#     dolor,
+#     sit
+# } = elit;
+trailing_comma = "Vertical"
+
+# ----------------------------------------------------------------------------
+# trailing_semicolon
+# ----------------------------------------------------------------------------
+# Add trailing semicolon after break, continue, and return
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true:
+# fn foo() -> usize {
+#     return 0;
+# }
+#
+# false:
+# fn foo() -> usize {
+#     return 0
+# }
+trailing_semicolon = true
+
+# ----------------------------------------------------------------------------
+# match_block_trailing_comma
+# ----------------------------------------------------------------------------
+# Put trailing comma after block-based match arms
+# Values: true, false
+# Default: false
+# Stable: Yes
+#
+# false:
+# match lorem {
+#     Lorem::Ipsum => {
+#         println!("ipsum");
+#     }
+#     Lorem::Dolor => println!("dolor"),
+# }
+#
+# true:
+# match lorem {
+#     Lorem::Ipsum => {
+#         println!("ipsum");
+#     },
+#     Lorem::Dolor => println!("dolor"),
+# }
+match_block_trailing_comma = true
+
+# ----------------------------------------------------------------------------
+# match_arm_leading_pipes
+# ----------------------------------------------------------------------------
+# Include leading pipes on match arms
+# Values: "Always", "Never", "Preserve"
+# Default: "Never"
+# Stable: Yes
+#
+# "Never":
+# match foo {
+#     "foo" | "bar" => {}
+#     "baz" | "qux" => {}
+#     _ => {}
+# }
+#
+# "Always":
+# match foo {
+#     | "foo" | "bar" => {}
+#     | "baz" | "qux" => {}
+#     | _ => {}
+# }
+match_arm_leading_pipes = "Always"
+
+# ----------------------------------------------------------------------------
+# match_arm_blocks
+# ----------------------------------------------------------------------------
+# Wrap match arm bodies in blocks when they don't fit on same line as =>
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true:
+# match lorem {
+#     ipsum => {
+#         fooooooooooooooooooooooo(x)
+#     }
+#     dolor => println!("{}", sit),
+# }
+#
+# false:
+# match lorem {
+#     lorem =>
+#         fooooooooooooooooooooooo(x),
+#     ipsum => println!("{}", sit),
+# }
+match_arm_blocks = true
+
+# ============================================================================
+# FUNCTIONS & PARAMETERS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# fn_params_layout
+# ----------------------------------------------------------------------------
+# Function parameter layout
+# Values: "Compressed", "Tall", "Vertical"
+# Default: "Tall"
+# Stable: Yes
+#
+# "Tall" (breaks when needed):
+# fn lorem(ipsum: Ipsum, dolor: Dolor);
+#
+# fn lorem(
+#     ipsum: Ipsum,
+#     dolor: Dolor,
+#     sit: Sit,
+#     amet: Amet,
+# );
+#
+# "Vertical" (always breaks):
+# fn lorem(
+#     ipsum: Ipsum,
+#     dolor: Dolor,
+# );
+#
+# "Compressed" (packs multiple params per line):
+# fn lorem(
+#     ipsum: Ipsum, dolor: Dolor, sit: Sit, amet: Amet,
+# );
+fn_params_layout = "Tall"
+
+# ----------------------------------------------------------------------------
+# fn_single_line
+# ----------------------------------------------------------------------------
+# Put single-expression functions on one line
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# fn lorem() -> usize {
+#     42
+# }
+#
+# true:
+# fn lorem() -> usize { 42 }
+fn_single_line = false
+
+# ----------------------------------------------------------------------------
+# fn_call_width
+# ----------------------------------------------------------------------------
+# Max width for function call args before breaking to vertical
+# Values: any positive integer
+# Default: 60
+# Stable: Yes
+#
+# 60:
+# lorem(
+#     "lorem",
+#     "ipsum",
+#     "dolor",
+# );
+#
+# 100:
+# lorem("lorem", "ipsum", "dolor");
+fn_call_width = 60
+
+# ----------------------------------------------------------------------------
+# force_explicit_abi
+# ----------------------------------------------------------------------------
+# Always print the ABI for extern items
+# Values: true, false
+# Default: true
+# Stable: Yes
+#
+# true:
+# extern "C" {
+#     pub static lorem: c_int;
+# }
+#
+# false (omits "C"):
+# extern {
+#     pub static lorem: c_int;
+# }
+force_explicit_abi = true
+
+# ============================================================================
+# ARRAYS, STRUCTS & EXPRESSIONS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# array_width
+# ----------------------------------------------------------------------------
+# Max width for arrays before breaking to vertical
+# Values: any positive integer
+# Default: 60
+# Stable: Yes
+#
+# 60:
+# let arr = [
+#     "lorem",
+#     "ipsum",
+# ];
+#
+# 100:
+# let arr = ["lorem", "ipsum", "dolor"];
+array_width = 60
+
+# ----------------------------------------------------------------------------
+# chain_width
+# ----------------------------------------------------------------------------
+# Max width for method chains before breaking
+# Values: any positive integer
+# Default: 60
+# Stable: Yes
+#
+# 60:
+# let result = lorem
+#     .ipsum()
+#     .dolor();
+#
+# 100:
+# let result = lorem.ipsum().dolor();
+chain_width = 60
+
+# ----------------------------------------------------------------------------
+# struct_lit_width
+# ----------------------------------------------------------------------------
+# Max width for struct literals before breaking
+# Values: any positive integer
+# Default: 18
+# Stable: Yes
+#
+# 18:
+# let lorem = Lorem {
+#     foo: bar,
+# };
+#
+# 50:
+# let lorem = Lorem { foo: bar, baz: ofo };
+struct_lit_width = 18
+
+# ----------------------------------------------------------------------------
+# struct_variant_width
+# ----------------------------------------------------------------------------
+# Max width for struct variants before breaking
+# Values: any positive integer
+# Default: 35
+# Stable: Yes
+#
+# 35:
+# enum Lorem {
+#     Sit {
+#         amet: Consectetur,
+#     },
+# }
+#
+# 50:
+# enum Lorem {
+#     Sit { amet: Consectetur, adipiscing: Elit },
+# }
+struct_variant_width = 35
+
+# ----------------------------------------------------------------------------
+# struct_lit_single_line
+# ----------------------------------------------------------------------------
+# Put small struct literals on single line
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true:
+# let lorem = Lorem { foo: bar, baz: ofo };
+#
+# false (always break):
+# let lorem = Lorem {
+#     foo: bar,
+#     baz: ofo,
+# };
+struct_lit_single_line = false
+
+# ----------------------------------------------------------------------------
+# short_array_element_width_threshold
+# ----------------------------------------------------------------------------
+# Width threshold for "short" array elements
+# If all elements are short, array uses compressed style
+# Values: any positive integer
+# Default: 10
+# Stable: Yes
+#
+# 10 (elements are 18 chars, so vertical):
+# pub const FORMAT_TEST: [u64; 5] = [
+#     0x0000000000000000,
+#     0xAAAAAAAAAAAAAAAA,
+# ];
+#
+# 20 (elements now "short", so compressed):
+# pub const FORMAT_TEST: [u64; 5] = [
+#     0x0000000000000000, 0xAAAAAAAAAAAAAAAA,
+# ];
+short_array_element_width_threshold = 10
+
+# ----------------------------------------------------------------------------
+# use_field_init_shorthand
+# ----------------------------------------------------------------------------
+# Use field init shorthand { x } instead of { x: x }
+# Values: true, false
+# Default: false
+# Stable: Yes
+#
+# false:
+# let a = Foo { x, y, z };
+# let b = Foo { x: x, y: y, z: z };  // stays as-is
+#
+# true:
+# let a = Foo { x, y, z };
+# let b = Foo { x, y, z };  // converted
+use_field_init_shorthand = false
+
+# ----------------------------------------------------------------------------
+# overflow_delimited_expr
+# ----------------------------------------------------------------------------
+# Allow structs/slices/arrays as last arg to overflow (like blocks/closures)
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# foo(
+#     ctx,
+#     Bar {
+#         x: value,
+#     },
+# );
+#
+# true:
+# foo(ctx, Bar {
+#     x: value,
+# });
+overflow_delimited_expr = false
+
+# ----------------------------------------------------------------------------
+# single_line_if_else_max_width
+# ----------------------------------------------------------------------------
+# Max width for single-line if-else expressions
+# Values: any positive integer (0 = always break)
+# Default: 50
+# Stable: Yes
+#
+# 50:
+# let lorem = if ipsum { dolor } else { sit };
+#
+# 0 (always break):
+# let lorem = if ipsum {
+#     dolor
+# } else {
+#     sit
+# };
+single_line_if_else_max_width = 0
+
+# ----------------------------------------------------------------------------
+# single_line_let_else_max_width
+# ----------------------------------------------------------------------------
+# Max width for single-line let-else statements
+# Values: any positive integer (0 = always break)
+# Default: 50
+# Stable: Yes
+#
+# 50:
+# let Some(w) = opt else { return Ok(()) };
+#
+# 0 (always break):
+# let Some(w) = opt else {
+#     return Ok(());
+# };
+single_line_let_else_max_width = 0
+
+# ============================================================================
+# WHITESPACE & ALIGNMENT
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# blank_lines_lower_bound
+# ----------------------------------------------------------------------------
+# Minimum blank lines between items
+# Values: any non-negative integer
+# Default: 0
+# Stable: No
+#
+# 0 (no minimum):
+# fn foo() {}
+# fn bar() {}
+#
+# 1:
+# fn foo() {
+# }
+#
+# fn bar() {
+# }
+blank_lines_lower_bound = 0
+
+# ----------------------------------------------------------------------------
+# blank_lines_upper_bound
+# ----------------------------------------------------------------------------
+# Maximum blank lines between items
+# Values: any non-negative integer
+# Default: 1
+# Stable: No
+#
+# 1:
+# fn foo() {}
+#
+# fn bar() {}
+#
+# 2:
+# fn foo() {}
+#
+#
+# fn bar() {}
+blank_lines_upper_bound = 1
+
+# ----------------------------------------------------------------------------
+# space_after_colon
+# ----------------------------------------------------------------------------
+# Leave space after colons
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true:
+# fn lorem<T: Eq>(t: T) {
+#     let lorem: Dolor = Lorem {
+#         ipsum: dolor,
+#     };
+# }
+#
+# false:
+# fn lorem<T:Eq>(t:T) {
+#     let lorem:Dolor = Lorem {
+#         ipsum:dolor,
+#     };
+# }
+space_after_colon = true
+
+# ----------------------------------------------------------------------------
+# space_before_colon
+# ----------------------------------------------------------------------------
+# Leave space before colons
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# fn lorem<T: Eq>(t: T) {}
+#
+# true:
+# fn lorem<T : Eq>(t : T) {}
+space_before_colon = false
+
+# ----------------------------------------------------------------------------
+# spaces_around_ranges
+# ----------------------------------------------------------------------------
+# Put spaces around range operators (.., ..=)
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# let lorem = 0..10;
+# let ipsum = 0..=10;
+#
+# true:
+# let lorem = 0 .. 10;
+# let ipsum = 0 ..= 10;
+spaces_around_ranges = false
+
+# ----------------------------------------------------------------------------
+# type_punctuation_density
+# ----------------------------------------------------------------------------
+# Spacing in type punctuation (+, =)
+# Values: "Compressed", "Wide"
+# Default: "Wide"
+# Stable: No
+#
+# "Wide":
+# fn lorem<Ipsum: Dolor + Sit = Amet>() {}
+#
+# "Compressed":
+# fn lorem<Ipsum: Dolor+Sit=Amet>() {}
+type_punctuation_density = "Wide"
+
+# ----------------------------------------------------------------------------
+# enum_discrim_align_threshold
+# ----------------------------------------------------------------------------
+# Align enum discriminants if variant names are below this threshold
+# Values: any non-negative integer (0 = no alignment)
+# Default: 0
+# Stable: No
+#
+# 0:
+# enum Foo {
+#     A = 0,
+#     Bb = 1,
+#     Ccc = 71,
+# }
+#
+# 20:
+# enum Foo {
+#     A   = 0,
+#     Bb  = 1,
+#     VeryLongVariant = 10,  // too long, not counted
+#     Ccc = 2,
+# }
+enum_discrim_align_threshold = 20
+
+# ----------------------------------------------------------------------------
+# struct_field_align_threshold
+# ----------------------------------------------------------------------------
+# Align struct field types if field names differ by less than this threshold
+# Values: any non-negative integer (0 = no alignment)
+# Default: 0
+# Stable: No
+#
+# 0:
+# struct Foo {
+#     x: u32,
+#     yy: u32,
+#     zzz: u32,
+# }
+#
+# 60:
+# struct Foo {
+#     x:                       u32,
+#     yy:                      u32,
+#     zzz:                     u32,
+#     field_with_long_name:    String,
+# }
+struct_field_align_threshold = 60
+
+# ----------------------------------------------------------------------------
+# inline_attribute_width
+# ----------------------------------------------------------------------------
+# Max combined width for item + attribute on same line
+# Values: any non-negative integer (0 = never inline)
+# Default: 0
+# Stable: No
+#
+# 0:
+# #[cfg(feature = "alloc")]
+# use core::slice;
+#
+# 50:
+# #[cfg(feature = "alloc")] use core::slice;
+inline_attribute_width = 0
+
+# ============================================================================
+# COMMENTS & DOCUMENTATION
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# comment_width
+# ----------------------------------------------------------------------------
+# Max comment width (only works with wrap_comments = true)
+# Values: any positive integer
+# Default: 80
+# Stable: No
+#
+# With wrap_comments = true:
+#
+# 80:
+# // Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+#
+# 60:
+# // Lorem ipsum dolor sit amet,
+# // consectetur adipiscing elit.
+comment_width = 80
+
+# ----------------------------------------------------------------------------
+# wrap_comments
+# ----------------------------------------------------------------------------
+# Break comments to fit on the line
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# Note: Won't wrap markdown headers or URLs
+#
+# false:
+# // Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod...
+#
+# true:
+# // Lorem ipsum dolor sit amet, consectetur adipiscing elit,
+# // sed do eiusmod tempor incididunt ut labore et dolore
+wrap_comments = true
+
+# ----------------------------------------------------------------------------
+# normalize_comments
+# ----------------------------------------------------------------------------
+# Convert /* */ comments to // where possible
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# // Lorem ipsum:
+# fn dolor() {}
+#
+# /* sit amet: */
+# fn adipiscing() {}
+#
+# true:
+# // Lorem ipsum:
+# fn dolor() {}
+#
+# // sit amet:
+# fn adipiscing() {}
+normalize_comments = true
+
+# ----------------------------------------------------------------------------
+# normalize_doc_attributes
+# ----------------------------------------------------------------------------
+# Convert #[doc] and #![doc] to /// and //!
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# #![doc = "Example documentation"]
+#
+# #[doc = "Example item documentation"]
+# pub enum Bar {}
+#
+# true:
+# //! Example documentation
+#
+# /// Example item documentation
+# pub enum Foo {}
+normalize_doc_attributes = true
+
+# ----------------------------------------------------------------------------
+# format_code_in_doc_comments
+# ----------------------------------------------------------------------------
+# Format code snippets in doc comments
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# /// ```rust
+# /// let five=5;
+# /// assert_eq!(6,add_one(5));
+# /// ```
+#
+# true:
+# /// ```rust
+# /// let five = 5;
+# /// assert_eq!(6, add_one(5));
+# /// ```
+format_code_in_doc_comments = true
+
+# ----------------------------------------------------------------------------
+# doc_comment_code_block_width
+# ----------------------------------------------------------------------------
+# Max width for code in doc comments
+# Only works with format_code_in_doc_comments = true
+# Values: any positive integer
+# Default: 100
+# Stable: No
+doc_comment_code_block_width = 80
+
+# ============================================================================
+# MACROS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# format_macro_matchers
+# ----------------------------------------------------------------------------
+# Format metavariable matching patterns in macros
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# macro_rules! foo {
+#     ($a: ident : $b: ty) => {
+#         $a(42): $b;
+#     };
+# }
+#
+# true:
+# macro_rules! foo {
+#     ($a:ident : $b:ty) => {
+#         $a(42): $b;
+#     };
+# }
+format_macro_matchers = true
+
+# ----------------------------------------------------------------------------
+# format_macro_bodies
+# ----------------------------------------------------------------------------
+# Format the bodies of declarative macros
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true:
+# macro_rules! foo {
+#     ($a: ident) => {
+#         $a(42): $b;
+#     };
+# }
+#
+# false:
+# macro_rules! foo {
+#     ($a: ident) => { $a(42): $b; };
+# }
+format_macro_bodies = true
+
+# ----------------------------------------------------------------------------
+# skip_macro_invocations
+# ----------------------------------------------------------------------------
+# Skip formatting macro invocations by name
+# Values: list of macro names, or ["*"] for all
+# Default: []
+# Stable: No
+#
+# []:
+# lorem!(
+#     const _: u8 = 0;
+# );
+#
+# ["lorem"]:
+# lorem!(
+#         const _: u8 = 0;
+# );
+#
+# ["*"] (skip all macros):
+# All macro invocations left as-is
+skip_macro_invocations = []
+
+# ============================================================================
+# ADVANCED FORMATTING
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# use_small_heuristics
+# ----------------------------------------------------------------------------
+# Controls width heuristics for various constructs
+# Sets defaults for fn_call_width, array_width, etc. as percentages of max_width
+# Values: "Default", "Off", "Max"
+# Default: "Default"
+# Stable: Yes
+#
+# "Default": Uses percentage-based widths (60%, 70%, etc.)
+# "Off": Disables heuristics, always breaks
+# "Max": Sets all widths to max_width
+use_small_heuristics = "Default"
+
+# ----------------------------------------------------------------------------
+# binop_separator
+# ----------------------------------------------------------------------------
+# Binary operator placement on multiline expressions
+# Values: "Front", "Back"
+# Default: "Front"
+# Stable: No
+#
+# "Front":
+# let or = fooooooo
+#     || barbarbar;
+#
+# let sum = 123456
+#     + 789012;
+#
+# "Back":
+# let or = fooooooo ||
+#     barbarbar;
+#
+# let sum = 123456 +
+#     789012;
+binop_separator = "Front"
+
+# ----------------------------------------------------------------------------
+# combine_control_expr
+# ----------------------------------------------------------------------------
+# Combine control expressions with function calls
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true:
+# foo!(if x {
+#     foo();
+# } else {
+#     bar();
+# });
+#
+# false:
+# foo!(
+#     if x {
+#         foo();
+#     } else {
+#         bar();
+#     }
+# );
+combine_control_expr = false
+
+# ----------------------------------------------------------------------------
+# condense_wildcard_suffixes
+# ----------------------------------------------------------------------------
+# Replace strings of _ wildcards with .. in tuple patterns
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# let (lorem, ipsum, _, _) = (1, 2, 3, 4);
+# let (lorem, ipsum, ..) = (1, 2, 3, 4);
+#
+# true:
+# let (lorem, ipsum, ..) = (1, 2, 3, 4);
+condense_wildcard_suffixes = true
+
+# ----------------------------------------------------------------------------
+# empty_item_single_line
+# ----------------------------------------------------------------------------
+# Put empty functions and impls on a single line
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true:
+# fn lorem() {}
+# impl Lorem {}
+#
+# false:
+# fn lorem() {
+# }
+# impl Lorem {
+# }
+empty_item_single_line = true
+
+# ----------------------------------------------------------------------------
+# force_multiline_blocks
+# ----------------------------------------------------------------------------
+# Force multiline closure and match arm bodies to be wrapped in blocks
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# result.and_then(|maybe_value| match maybe_value {
+#     None => foo(),
+#     Some(value) => bar(),
+# });
+#
+# true:
+# result.and_then(|maybe_value| {
+#     match maybe_value {
+#         None => foo(),
+#         Some(value) => bar(),
+#     }
+# });
+force_multiline_blocks = true
+
+# ----------------------------------------------------------------------------
+# remove_nested_parens
+# ----------------------------------------------------------------------------
+# Remove nested parentheses
+# Values: true, false
+# Default: true
+# Stable: Yes
+#
+# true:
+# fn main() {
+#     (foo());
+# }
+#
+# false:
+# fn main() {
+#     (foo());
+#     ((((foo()))));
+# }
+remove_nested_parens = true
+
+# ----------------------------------------------------------------------------
+# use_try_shorthand
+# ----------------------------------------------------------------------------
+# Replace try!() macro with ? operator
+# Values: true, false
+# Default: false
+# Stable: Yes
+#
+# false:
+# let lorem = ipsum.map(|d| d.sit())?;
+# let lorem = try!(ipsum.map(|d| d.sit()));
+#
+# true:
+# let lorem = ipsum.map(|d| d.sit())?;
+use_try_shorthand = true
+
+# ----------------------------------------------------------------------------
+# where_single_line
+# ----------------------------------------------------------------------------
+# Force where clause on a single line
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# impl<T> Lorem for T
+# where
+#     Option<T>: Ipsum,
+# {
+#     // body
+# }
+#
+# true:
+# impl<T> Lorem for T
+# where Option<T>: Ipsum
+# {
+#     // body
+# }
+where_single_line = false
+
+# ----------------------------------------------------------------------------
+# attr_fn_like_width
+# ----------------------------------------------------------------------------
+# Max width for function-like attributes before breaking
+# Values: any positive integer
+# Default: 70
+# Stable: Yes
+#
+# 70:
+# #[derive(
+#     Debug,
+#     Clone,
+# )]
+#
+# 100:
+# #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+attr_fn_like_width = 60
+
+# ----------------------------------------------------------------------------
+# format_strings
+# ----------------------------------------------------------------------------
+# Format string literals where necessary
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false:
+# let lorem = "ipsum dolor sit amet consectetur adipiscing elit lorem ipsum...";
+#
+# true:
+# let lorem = "ipsum dolor sit amet consectetur adipiscing elit lorem \
+#              ipsum dolor sit amet";
+format_strings = true
+
+# ============================================================================
+# ATTRIBUTES & DERIVES
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# merge_derives
+# ----------------------------------------------------------------------------
+# Merge multiple #[derive] into a single one
+# Values: true, false
+# Default: true
+# Stable: Yes
+#
+# true:
+# #[derive(Eq, PartialEq, Debug, Copy, Clone)]
+# pub enum Foo {}
+#
+# false:
+# #[derive(Eq, PartialEq)]
+# #[derive(Debug)]
+# #[derive(Copy, Clone)]
+# pub enum Foo {}
+merge_derives = true
+
+# ============================================================================
+# SPECIAL OPTIONS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# color
+# ----------------------------------------------------------------------------
+# Colored output for rustfmt messages
+# Values: "Auto", "Always", "Never"
+# Default: "Auto"
+# Stable: No
+#
+# "Auto": Auto-detect terminal support
+# "Always": Always use color
+# "Never": Never use color
+color = "Auto"
+
+# ----------------------------------------------------------------------------
+# disable_all_formatting
+# ----------------------------------------------------------------------------
+# Don't reformat anything
+# Values: true, false
+# Default: false
+# Stable: Yes
+#
+# Set to true to disable all formatting (useful for testing)
+disable_all_formatting = false
+
+# ----------------------------------------------------------------------------
+# skip_children
+# ----------------------------------------------------------------------------
+# Don't format out-of-line modules
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false: Format everything including external module files
+# mod utils;  // Will also format utils.rs
+#
+# true: Only format current file, skip external modules
+# mod utils;  // utils.rs will NOT be formatted
+skip_children = false
+
+# ----------------------------------------------------------------------------
+# ignore
+# ----------------------------------------------------------------------------
+# Files/directories to skip formatting (gitignore pattern format)
+# Values: list of patterns
+# Default: []
+# Stable: No
+#
+# Examples:
+# ignore = [
+#     "src/types.rs",        # Skip specific file
+#     "examples",            # Skip entire directory
+#     "generated",           # Skip generated code
+#     "bar_dir/*",           # Skip all files in directory
+#     "!bar_dir/*/what.rs",  # But allow exceptions with !
+# ]
+ignore = []
+
+# ----------------------------------------------------------------------------
+# error_on_line_overflow
+# ----------------------------------------------------------------------------
+# Error if rustfmt can't fit code within max_width (except comments/strings)
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false: Warn but continue
+# true: Error and fail
+error_on_line_overflow = true
+
+# ----------------------------------------------------------------------------
+# error_on_unformatted
+# ----------------------------------------------------------------------------
+# Error if unable to format comments/strings within max_width
+# Values: true, false
+# Default: false
+# Stable: No
+#
+# false: Warn but continue
+# true: Error and fail
+error_on_unformatted = true
+
+# ----------------------------------------------------------------------------
+# hex_literal_case
+# ----------------------------------------------------------------------------
+# Control hex literal letter case
+# Values: "Preserve", "Upper", "Lower"
+# Default: "Preserve"
+# Stable: No
+#
+# "Preserve":
+# let x = 0xaBcD;  // keeps as written
+#
+# "Upper":
+# let x = 0xABCD;
+#
+# "Lower":
+# let x = 0xabcd;
+hex_literal_case = "Upper"
+
+# ----------------------------------------------------------------------------
+# show_parse_errors
+# ----------------------------------------------------------------------------
+# Show parse errors if rustfmt can't parse files
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true: Show errors when parsing fails
+# false: Hide parse errors
+show_parse_errors = true
+
+# ----------------------------------------------------------------------------
+# format_generated_files
+# ----------------------------------------------------------------------------
+# Format files with @generated marker in first few lines
+# Values: true, false
+# Default: true
+# Stable: No
+#
+# true: Format files with @generated marker
+# false: Skip files with @generated marker
+format_generated_files = true
+
+# ----------------------------------------------------------------------------
+# generated_marker_line_search_limit
+# ----------------------------------------------------------------------------
+# Number of lines to check for @generated marker from top of file
+# Values: any non-negative integer
+# Default: 5
+# Stable: No
+#
+# Set to 0 to treat all files as non-generated
+generated_marker_line_search_limit = 5
+
+# ----------------------------------------------------------------------------
+# required_version
+# ----------------------------------------------------------------------------
+# OMITTED: Should follow rustfmt updates, not lock to specific version
+# Default: "CARGO_PKG_VERSION"
+# Stable: No
