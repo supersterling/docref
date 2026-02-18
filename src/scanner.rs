@@ -100,15 +100,20 @@ fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path) -> Option<Refe
         return None;
     }
 
-    // Resolve target relative to the markdown file's parent directory.
-    let source_dir = source.parent().unwrap_or(Path::new(""));
-    let resolved = normalize_path(&source_dir.join(raw_target));
-
     let symbol = parse_symbol_fragment_as_query(raw_symbol);
+
+    // Namespaced reference: store as-is (resolved later through Config).
+    let is_namespaced = raw_target.contains(':');
+    let target = if is_namespaced {
+        PathBuf::from(raw_target)
+    } else {
+        let source_dir = source.parent().unwrap_or(Path::new(""));
+        normalize_path(&source_dir.join(raw_target))
+    };
 
     Some(Reference {
         source: source.to_path_buf(),
-        target: resolved,
+        target,
         symbol,
     })
 }
@@ -122,5 +127,37 @@ fn parse_symbol_fragment_as_query(raw: &str) -> SymbolQuery {
         }
     } else {
         SymbolQuery::Bare(raw.to_string())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::missing_panics_doc)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_namespaced_reference() {
+        let pattern = Regex::new(r"\[([^\]]+)\]\(([^)#]+)#([^)]+)\)").unwrap();
+        let source = Path::new("docs/guide.md");
+        let line = "See [`validate`](auth:src/lib.rs#validate) for details.";
+        let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
+        extract_references_from_markdown_line(line, source, &pattern, &mut grouped);
+
+        let refs: Vec<&Reference> = grouped.values().flatten().collect();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].target, PathBuf::from("auth:src/lib.rs"));
+    }
+
+    #[test]
+    fn non_namespaced_resolves_relative_to_markdown() {
+        let pattern = Regex::new(r"\[([^\]]+)\]\(([^)#]+)#([^)]+)\)").unwrap();
+        let source = Path::new("docs/guide.md");
+        let line = "See [`add`](../src/lib.rs#add) for details.";
+        let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
+        extract_references_from_markdown_line(line, source, &pattern, &mut grouped);
+
+        let refs: Vec<&Reference> = grouped.values().flatten().collect();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].target, PathBuf::from("src/lib.rs"));
     }
 }
