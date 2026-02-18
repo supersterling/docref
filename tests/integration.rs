@@ -240,3 +240,53 @@ fn comment_changes_do_not_break_check() {
         String::from_utf8_lossy(&check.stdout)
     );
 }
+
+#[test]
+fn resolve_lists_symbols_in_rust_file() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "src/lib.rs"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("A"), "should list constant A: {stdout}");
+    assert!(stdout.contains("add"), "should list function add: {stdout}");
+}
+
+#[test]
+fn resolve_finds_specific_symbol() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "src/lib.rs", "add"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("src/lib.rs#add"),
+        "should show full reference path: {stdout}"
+    );
+}
+
+#[test]
+fn resolve_lists_markdown_headings() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "docs/overview.md"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("architecture"),
+        "should list architecture heading: {stdout}"
+    );
+    assert!(
+        stdout.contains("configuration"),
+        "should list configuration heading: {stdout}"
+    );
+}

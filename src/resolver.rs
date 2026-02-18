@@ -9,6 +9,41 @@ use crate::types::{ResolvedSymbol, SymbolQuery};
 /// Maximum source file size (16 MiB).
 const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024;
 
+/// A symbol found during file listing (for the resolve command).
+pub struct SymbolInfo {
+    /// The qualified name (e.g., "add" or "Config.validate").
+    pub name: String,
+}
+
+/// List all addressable symbols in a source file.
+///
+/// # Errors
+///
+/// Returns `Error::FileTooLarge` or `Error::ParseFailed` on invalid input.
+pub fn list_symbols(
+    file_path: &Path,
+    source: &str,
+    language: &Language,
+) -> Result<Vec<SymbolInfo>, Error> {
+    let source_len: u64 = source.len().try_into().unwrap_or(u64::MAX);
+    if source_len > MAX_FILE_SIZE {
+        return Err(Error::FileTooLarge {
+            file: file_path.to_path_buf(),
+            size_bytes: source_len,
+            max_bytes: MAX_FILE_SIZE,
+        });
+    }
+
+    let tree = parse_source(file_path, source, language)?;
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let declarations = collect_declarations(tree.root_node(), source, ext);
+
+    Ok(declarations
+        .into_iter()
+        .map(|d| SymbolInfo { name: d.qualified_name })
+        .collect())
+}
+
 /// Parse a source file and resolve one symbol query against it.
 ///
 /// # Errors

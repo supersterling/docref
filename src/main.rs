@@ -33,6 +33,13 @@ enum Commands {
         /// Reference in file#symbol format (e.g., src/lib.rs#add)
         reference: String,
     },
+    /// List addressable symbols in a file, or resolve a specific symbol
+    Resolve {
+        /// Path to the source file
+        file: String,
+        /// Optional symbol name to resolve
+        symbol: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -42,6 +49,9 @@ fn main() -> ExitCode {
         Commands::Init => cmd_init().map(|()| ExitCode::SUCCESS),
         Commands::Check => cmd_check(),
         Commands::Accept { reference } => cmd_accept(&reference).map(|()| ExitCode::SUCCESS),
+        Commands::Resolve { file, symbol } => {
+            cmd_resolve(&file, symbol.as_deref()).map(|()| ExitCode::SUCCESS)
+        },
     };
 
     match result {
@@ -117,6 +127,34 @@ fn cmd_check() -> Result<ExitCode, error::Error> {
         println!("All {total} references fresh");
         Ok(ExitCode::SUCCESS)
     }
+}
+
+/// List all symbols in a file, or resolve a specific symbol to its reference path.
+///
+/// # Errors
+///
+/// Returns errors from file reading, language detection, or resolution.
+fn cmd_resolve(file: &str, symbol: Option<&str>) -> Result<(), error::Error> {
+    let file_path = PathBuf::from(file);
+    let source = std::fs::read_to_string(&file_path)
+        .map_err(|_| error::Error::FileNotFound { path: file_path.clone() })?;
+    let language = grammar::language_for_path(&file_path)?;
+
+    match symbol {
+        None => {
+            let symbols = resolver::list_symbols(&file_path, &source, &language)?;
+            for sym in &symbols {
+                println!("{file}#{}", sym.name);
+            }
+        },
+        Some(name) => {
+            let query = parse_entry_symbol(name);
+            resolver::resolve(&file_path, &source, &language, &query)?;
+            println!("{file}#{name}");
+        },
+    }
+
+    Ok(())
 }
 
 /// Re-hash a specific reference and update the lockfile.
