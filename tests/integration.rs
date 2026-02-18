@@ -398,3 +398,44 @@ fn config_excludes_directories() {
         "should exclude docs/external/: {content}"
     );
 }
+
+#[test]
+fn accept_file_updates_all_refs_in_doc() {
+    let (_tmp, dir) = isolated_fixture("basic");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+
+    // Init, then modify both referenced symbols.
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let modified = original
+        .replace("const A: i32 = 10;", "const A: i32 = 99;")
+        .replace("x + A", "x * A");
+    std::fs::write(&src, &modified).unwrap();
+
+    // Both A and add should be stale.
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert_eq!(check.status.code().unwrap(), 1, "expected stale");
+
+    // Accept all refs originating from guide.md.
+    let accept = docref_at(&dir)
+        .args(["accept", "--file", "docs/guide.md"])
+        .output()
+        .unwrap();
+    assert!(
+        accept.status.success(),
+        "accept --file failed: {}",
+        String::from_utf8_lossy(&accept.stderr)
+    );
+
+    // Check should pass now — guide.md's refs are accepted,
+    // and api.md's refs (app.ts) were never stale.
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check still failing after accept --file: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+}

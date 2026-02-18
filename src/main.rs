@@ -32,7 +32,11 @@ enum Commands {
     /// Re-hash a stale reference so check passes again
     Accept {
         /// Reference in file#symbol format (e.g., src/lib.rs#add)
-        reference: String,
+        #[arg(conflicts_with = "file")]
+        reference: Option<String>,
+        /// Accept all references originating from this markdown file
+        #[arg(long)]
+        file: Option<String>,
     },
     /// List addressable symbols in a file, or resolve a specific symbol
     Resolve {
@@ -51,7 +55,14 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Commands::Init => cmd_init().map(|()| ExitCode::SUCCESS),
         Commands::Check => cmd_check(),
-        Commands::Accept { reference } => cmd_accept(&reference).map(|()| ExitCode::SUCCESS),
+        Commands::Accept { reference, file } => match (reference, file) {
+            (Some(r), None) => cmd_accept(&r).map(|()| ExitCode::SUCCESS),
+            (None, Some(f)) => cmd_accept_file(&f).map(|()| ExitCode::SUCCESS),
+            _ => {
+                eprintln!("error: provide either a file#symbol reference or --file");
+                Ok(ExitCode::FAILURE)
+            },
+        },
         Commands::Resolve { file, symbol } => {
             cmd_resolve(&file, symbol.as_deref()).map(|()| ExitCode::SUCCESS)
         },
@@ -228,6 +239,64 @@ fn cmd_accept(reference: &str) -> Result<(), error::Error> {
 
     lockfile.write(&lock_path)?;
     println!("Accepted {}#{symbol}", file.display());
+
+    Ok(())
+}
+
+/// Re-hash all references originating from a specific markdown source file.
+/// Groups entries by target file so each target is parsed once.
+///
+/// # Errors
+///
+/// Returns errors from lockfile I/O, resolution, or hashing.
+fn cmd_accept_file(source_file: &str) -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let lock_path = root.join(".docref.lock");
+    let source_path = PathBuf::from(source_file);
+
+    let mut lockfile = Lockfile::read(&lock_path)?;
+
+    // Collect indices of entries matching this source file.
+    let matching_indices: Vec<usize> = lockfile
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.source == source_path)
+        .map(|(i, _)| i)
+        .collect();
+
+    if matching_indices.is_empty() {
+        return Err(error::Error::FileNotFound {
+            path: source_path,
+        });
+    }
+
+    // Group matching entries by target file for batch resolution.
+    let mut by_target: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+    for &idx in &matching_indices {
+        let target = lockfile.entries[idx].target.clone();
+        by_target.entry(target).or_default().push(idx);
+    }
+
+    // Re-resolve and re-hash each group, parsing each target file once.
+    for (target, indices) in &by_target {
+        let target_path = root.join(target);
+        let source = std::fs::read_to_string(&target_path)
+            .map_err(|_| error::Error::FileNotFound { path: target_path })?;
+        let language = grammar::language_for_path(target)?;
+
+        for &idx in indices {
+            let symbol = &lockfile.entries[idx].symbol;
+            let query = parse_entry_symbol(symbol);
+            let resolved = resolver::resolve(target, &source, &language, &query)?;
+            let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
+            lockfile.entries[idx].hash = new_hash;
+        }
+    }
+
+    lockfile.write(&lock_path)?;
+    let count = matching_indices.len();
+    println!("Accepted {count} references from {source_file}");
 
     Ok(())
 }
