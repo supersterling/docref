@@ -1,3 +1,3 @@
 # Refs
 
-See [`Foo's Example`](docs/overview.md#foo.example) for context.
+See [`Foo's Example`](overview.md#foo.example) for context.

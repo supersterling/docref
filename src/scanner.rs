@@ -71,6 +71,21 @@ fn extract_references_from_markdown_line(
     }
 }
 
+/// Collapse `.` and `..` components in a path without touching the filesystem.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => components.push(other),
+        }
+    }
+    components.iter().collect()
+}
+
 /// Try to parse a regex capture into a local code reference.
 /// Returns `None` for external URLs or empty fragments.
 fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path) -> Option<Reference> {
@@ -85,12 +100,15 @@ fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path) -> Option<Refe
         return None;
     }
 
-    let target = PathBuf::from(raw_target);
+    // Resolve target relative to the markdown file's parent directory.
+    let source_dir = source.parent().unwrap_or(Path::new(""));
+    let resolved = normalize_path(&source_dir.join(raw_target));
+
     let symbol = parse_symbol_fragment_as_query(raw_symbol);
 
     Some(Reference {
         source: source.to_path_buf(),
-        target,
+        target: resolved,
         symbol,
     })
 }
