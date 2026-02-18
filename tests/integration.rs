@@ -132,3 +132,29 @@ fn accept_updates_stale_reference() {
         String::from_utf8_lossy(&check.stdout)
     );
 }
+
+#[test]
+fn typescript_references_resolve_and_check() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Lockfile should contain TypeScript references.
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(content.contains("app.ts"), "lockfile missing TypeScript refs");
+    assert!(content.contains("VERSION"), "lockfile missing VERSION symbol");
+    assert!(content.contains("greet"), "lockfile missing greet symbol");
+
+    // Check should pass.
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}

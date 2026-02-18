@@ -33,14 +33,14 @@ pub fn resolve(
     }
 
     let tree = parse_source(file_path, source, language)?;
-    let declarations = collect_rust_declarations(tree.root_node(), source);
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let declarations = collect_declarations(tree.root_node(), source, ext);
 
     match query {
         SymbolQuery::Bare(name) => find_by_name(&declarations, name, file_path),
-        SymbolQuery::Scoped {
-            parent,
-            child,
-        } => find_scoped(&declarations, parent, child, file_path),
+        SymbolQuery::Scoped { parent, child } => {
+            find_scoped(&declarations, parent, child, file_path)
+        },
     }
 }
 
@@ -69,7 +69,18 @@ struct Declaration {
     byte_range: Range<u32>,
 }
 
-/// Walk the tree and collect all named declarations (Rust only for now).
+/// Dispatch to the correct collector based on file extension.
+fn collect_declarations(root: Node<'_>, source: &str, ext: &str) -> Vec<Declaration> {
+    match ext {
+        "rs" => collect_rust_declarations(root, source),
+        "ts" | "tsx" => collect_ts_declarations(root, source),
+        _ => Vec::new(),
+    }
+}
+
+// ── Rust ───────────────────────────────────────────────────────────────
+
+/// Walk the tree and collect all named Rust declarations.
 fn collect_rust_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
     let mut declarations = Vec::new();
     let mut cursor = root.walk();
@@ -86,16 +97,11 @@ fn collect_rust_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
     declarations
 }
 
-/// Try to extract a top-level declaration from a CST node.
+/// Try to extract a top-level declaration from a Rust CST node.
 fn rust_top_level_declaration(node: Node<'_>, source: &str) -> Option<Declaration> {
     match node.kind() {
-        | "function_item"
-        | "const_item"
-        | "struct_item"
-        | "enum_item"
-        | "static_item"
-        | "type_item"
-        | "trait_item" => {},
+        "function_item" | "const_item" | "struct_item" | "enum_item" | "static_item"
+        | "type_item" | "trait_item" => {},
         _ => return None,
     }
 
@@ -111,7 +117,7 @@ fn rust_top_level_declaration(node: Node<'_>, source: &str) -> Option<Declaratio
     })
 }
 
-/// Collect methods from an impl block, qualified as "Type.method".
+/// Collect methods from a Rust impl block, qualified as "Type.method".
 fn collect_impl_methods(impl_node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
     let Some(type_node) = impl_node.child_by_field_name("type") else {
         return;
@@ -133,7 +139,7 @@ fn collect_impl_methods(impl_node: Node<'_>, source: &str, declarations: &mut Ve
     }
 }
 
-/// Extract a method declaration from an impl body child node.
+/// Extract a method declaration from a Rust impl body child node.
 fn impl_method_declaration(
     node: Node<'_>,
     source: &str,
@@ -154,6 +160,86 @@ fn impl_method_declaration(
         byte_range: start..end,
     })
 }
+
+// ── TypeScript ─────────────────────────────────────────────────────────
+
+/// Walk the tree and collect all named TypeScript declarations.
+fn collect_ts_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
+    let mut declarations = Vec::new();
+    let mut cursor = root.walk();
+
+    for node in root.children(&mut cursor) {
+        if let Some(decl) = ts_top_level_declaration(node, source) {
+            declarations.push(decl);
+        }
+        // lexical_declaration wraps variable_declarator(s).
+        if node.kind() == "lexical_declaration" {
+            collect_ts_variable_declarators(node, source, &mut declarations);
+        }
+    }
+
+    declarations
+}
+
+/// Try to extract a top-level TypeScript declaration with a direct "name" field.
+fn ts_top_level_declaration(node: Node<'_>, source: &str) -> Option<Declaration> {
+    match node.kind() {
+        "function_declaration" | "class_declaration" | "interface_declaration"
+        | "type_alias_declaration" | "enum_declaration" => {},
+        _ => return None,
+    }
+
+    let name_node = node.child_by_field_name("name")?;
+    let name = name_node.utf8_text(source.as_bytes()).ok()?.to_string();
+    let start = u32::try_from(node.start_byte()).ok()?;
+    let end = u32::try_from(node.end_byte()).ok()?;
+
+    Some(Declaration {
+        qualified_name: name.clone(),
+        name,
+        byte_range: start..end,
+    })
+}
+
+/// Extract variable names from a TypeScript `lexical_declaration` (const/let/var).
+fn collect_ts_variable_declarators(
+    node: Node<'_>,
+    source: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(decl) = ts_variable_declarator(child, source, node) else {
+            continue;
+        };
+        declarations.push(decl);
+    }
+}
+
+/// Extract a single variable declarator as a declaration.
+/// Uses the parent `lexical_declaration`'s byte range so the hash
+/// covers the full `const X = ...;` statement.
+fn ts_variable_declarator(
+    node: Node<'_>,
+    source: &str,
+    parent: Node<'_>,
+) -> Option<Declaration> {
+    let name_node = node.child_by_field_name("name")?;
+    let name = name_node.utf8_text(source.as_bytes()).ok()?.to_string();
+    let start = u32::try_from(parent.start_byte()).ok()?;
+    let end = u32::try_from(parent.end_byte()).ok()?;
+
+    Some(Declaration {
+        qualified_name: name.clone(),
+        name,
+        byte_range: start..end,
+    })
+}
+
+// ── Shared lookup ──────────────────────────────────────────────────────
 
 /// Find a declaration by bare name.
 ///
