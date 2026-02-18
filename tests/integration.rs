@@ -290,3 +290,24 @@ fn resolve_lists_markdown_headings() {
         "should list configuration heading: {stdout}"
     );
 }
+
+#[test]
+fn status_shows_all_references() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    // Init first to create lockfile.
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir).arg("status").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should list all tracked references.
+    assert!(stdout.contains("lib.rs") && stdout.contains("A"), "missing A: {stdout}");
+    assert!(stdout.contains("lib.rs") && stdout.contains("add"), "missing add: {stdout}");
+    assert!(
+        stdout.contains("app.ts") && stdout.contains("VERSION"),
+        "missing VERSION: {stdout}"
+    );
+}

@@ -40,6 +40,8 @@ enum Commands {
         /// Optional symbol name to resolve
         symbol: Option<String>,
     },
+    /// Show all tracked references and their current freshness
+    Status,
 }
 
 fn main() -> ExitCode {
@@ -52,6 +54,7 @@ fn main() -> ExitCode {
         Commands::Resolve { file, symbol } => {
             cmd_resolve(&file, symbol.as_deref()).map(|()| ExitCode::SUCCESS)
         },
+        Commands::Status => cmd_status().map(|()| ExitCode::SUCCESS),
     };
 
     match result {
@@ -127,6 +130,36 @@ fn cmd_check() -> Result<ExitCode, error::Error> {
         println!("All {total} references fresh");
         Ok(ExitCode::SUCCESS)
     }
+}
+
+/// Show all tracked references and their current freshness. Always exits 0.
+///
+/// # Errors
+///
+/// Returns errors from lockfile reading or hash computation.
+fn cmd_status() -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let lock_path = root.join(".docref.lock");
+
+    let lockfile = Lockfile::read(&lock_path)?;
+
+    for entry in &lockfile.entries {
+        let label = match check_entry(&root, entry)? {
+            CheckResult::Fresh => "FRESH ",
+            CheckResult::Stale => "STALE ",
+            CheckResult::Broken(reason) => {
+                println!(
+                    "BROKEN  {}#{} ({reason})",
+                    entry.target.display(),
+                    entry.symbol
+                );
+                continue;
+            },
+        };
+        println!("{label}  {}#{}", entry.target.display(), entry.symbol);
+    }
+
+    Ok(())
 }
 
 /// List all symbols in a file, or resolve a specific symbol to its reference path.
