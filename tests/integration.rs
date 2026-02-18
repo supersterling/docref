@@ -353,3 +353,26 @@ fn dotpath_resolves_scoped_heading() {
     let check = docref_at(&dir).arg("check").output().unwrap();
     assert!(check.status.success());
 }
+
+#[test]
+fn ambiguous_bare_symbol_errors_with_candidates() {
+    let (_tmp, dir) = isolated_fixture("scoped");
+
+    // "example" is ambiguous — two ### Example headings under different parents.
+    let output = docref_at(&dir)
+        .args(["resolve", "docs/overview.md", "example"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "should fail on ambiguous symbol"
+    );
+
+    // Error output should suggest qualified dot-paths.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("foo.example") && stderr.contains("bar.example"),
+        "should suggest qualified candidates: {stderr}"
+    );
+}
