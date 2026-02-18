@@ -72,6 +72,14 @@ enum NamespaceAction {
         /// New namespace name
         new: String,
     },
+    /// Remove a namespace mapping
+    Remove {
+        /// Namespace name to remove
+        name: String,
+        /// Force removal even if references exist
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -99,6 +107,9 @@ fn main() -> ExitCode {
             },
             NamespaceAction::Rename { old, new } => {
                 cmd_namespace_rename(&old, &new).map(|()| ExitCode::SUCCESS)
+            },
+            NamespaceAction::Remove { name, force } => {
+                cmd_namespace_remove(&name, force).map(|()| ExitCode::SUCCESS)
             },
         },
     };
@@ -464,6 +475,50 @@ fn cmd_namespace_rename(old: &str, new: &str) -> Result<(), error::Error> {
     rewrite_namespace_in_markdown_files(&root, &config, old, new)?;
 
     println!("Renamed namespace: {old} -> {new}");
+    Ok(())
+}
+
+/// Remove a namespace from config and lockfile. Refuses if references
+/// exist unless `force` is set.
+///
+/// # Errors
+///
+/// Returns `Error::UnknownNamespace` if references exist (with hint),
+/// or errors from config/lockfile operations.
+fn cmd_namespace_remove(name: &str, force: bool) -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let lock_path = root.join(".docref.lock");
+
+    let prefix = format!("{name}:");
+    if lock_path.exists() && !force {
+        let lockfile = Lockfile::read(&lock_path)?;
+        let count = lockfile
+            .entries
+            .iter()
+            .filter(|e| e.target.to_string_lossy().starts_with(&prefix))
+            .count();
+
+        if count > 0 {
+            return Err(error::Error::UnknownNamespace {
+                name: format!("{name} (in use by {count} references, use --force to remove)"),
+            });
+        }
+    }
+
+    config::remove_namespace(&root, name)?;
+
+    if lock_path.exists() {
+        let lockfile = Lockfile::read(&lock_path)?;
+        let remaining: Vec<LockEntry> = lockfile
+            .entries
+            .into_iter()
+            .filter(|e| !e.target.to_string_lossy().starts_with(&prefix))
+            .collect();
+        let lockfile = Lockfile::new(remaining);
+        lockfile.write(&lock_path)?;
+    }
+
+    println!("Removed namespace: {name}");
     Ok(())
 }
 

@@ -551,6 +551,50 @@ fn namespace_rename_updates_config_lockfile_and_markdown() {
 }
 
 #[test]
+fn namespace_remove_refuses_with_active_references() {
+    let (_tmp, dir) = isolated_fixture("namespaced");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir)
+        .args(["namespace", "remove", "auth"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "remove should fail with active references"
+    );
+}
+
+#[test]
+fn namespace_remove_force_succeeds() {
+    let (_tmp, dir) = isolated_fixture("namespaced");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir)
+        .args(["namespace", "remove", "auth", "--force"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "remove --force failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let config = std::fs::read_to_string(dir.join(".docref.toml")).unwrap();
+    assert!(!config.contains("auth"), "config still has auth: {config}");
+
+    let lock = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        !lock.contains("auth:"),
+        "lockfile still has auth refs: {lock}"
+    );
+}
+
+#[test]
 fn namespace_add_creates_mapping() {
     let (_tmp, dir) = isolated_fixture("basic");
 
