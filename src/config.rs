@@ -248,6 +248,40 @@ pub fn add_namespace(root: &Path, name: &str, namespace_path: &str) -> Result<()
     Ok(())
 }
 
+/// Rename a namespace key in `.docref.toml`.
+///
+/// # Errors
+///
+/// Returns `Error::UnknownNamespace` if the old name isn't found.
+pub fn rename_namespace(root: &Path, old: &str, new: &str) -> Result<(), Error> {
+    let config_path = root.join(".docref.toml");
+    let content = std::fs::read_to_string(&config_path)?;
+
+    let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e: toml_edit::TomlError| {
+        Error::ParseFailed {
+            file: config_path.clone(),
+            reason: e.to_string(),
+        }
+    })?;
+
+    let namespaces = doc
+        .get_mut("namespaces")
+        .and_then(toml_edit::Item::as_table_mut)
+        .ok_or_else(|| Error::UnknownNamespace {
+            name: old.to_string(),
+        })?;
+
+    let value = namespaces
+        .remove(old)
+        .ok_or_else(|| Error::UnknownNamespace {
+            name: old.to_string(),
+        })?;
+
+    namespaces.insert(new, value);
+    std::fs::write(&config_path, doc.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::missing_panics_doc)]
 mod tests {

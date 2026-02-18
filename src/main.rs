@@ -65,6 +65,13 @@ enum NamespaceAction {
         /// Directory path (relative to config root)
         path: String,
     },
+    /// Rename a namespace (updates config, lockfile, and markdown files)
+    Rename {
+        /// Current namespace name
+        old: String,
+        /// New namespace name
+        new: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -89,6 +96,9 @@ fn main() -> ExitCode {
             NamespaceAction::List => cmd_namespace_list().map(|()| ExitCode::SUCCESS),
             NamespaceAction::Add { name, path } => {
                 cmd_namespace_add(&name, &path).map(|()| ExitCode::SUCCESS)
+            },
+            NamespaceAction::Rename { old, new } => {
+                cmd_namespace_rename(&old, &new).map(|()| ExitCode::SUCCESS)
             },
         },
     };
@@ -430,6 +440,87 @@ fn resolve_and_hash_all_references(
     }
 
     Ok(entries)
+}
+
+/// Rename a namespace across config, lockfile, and markdown files.
+///
+/// # Errors
+///
+/// Returns errors from config or lockfile operations, or markdown rewriting.
+fn cmd_namespace_rename(old: &str, new: &str) -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let lock_path = root.join(".docref.lock");
+
+    config::rename_namespace(&root, old, new)?;
+
+    if lock_path.exists() {
+        let lockfile = Lockfile::read(&lock_path)?;
+        let entries = rename_namespace_in_lock_entries(lockfile.entries, old, new);
+        let lockfile = Lockfile::new(entries);
+        lockfile.write(&lock_path)?;
+    }
+
+    let config = config::Config::load(&root)?;
+    rewrite_namespace_in_markdown_files(&root, &config, old, new)?;
+
+    println!("Renamed namespace: {old} -> {new}");
+    Ok(())
+}
+
+/// Replace a namespace prefix in all lock entry targets.
+fn rename_namespace_in_lock_entries(
+    entries: Vec<LockEntry>,
+    old: &str,
+    new: &str,
+) -> Vec<LockEntry> {
+    let old_prefix = format!("{old}:");
+    let new_prefix = format!("{new}:");
+
+    entries
+        .into_iter()
+        .map(|mut e| {
+            let target_str = e.target.to_string_lossy().to_string();
+            if let Some(rest) = target_str.strip_prefix(&old_prefix) {
+                e.target = PathBuf::from(format!("{new_prefix}{rest}"));
+            }
+            e
+        })
+        .collect()
+}
+
+/// Rewrite namespace prefixes in markdown link targets across all scanned files.
+///
+/// # Errors
+///
+/// Returns `Error::Io` on file read/write failures.
+fn rewrite_namespace_in_markdown_files(
+    root: &Path,
+    config: &config::Config,
+    old: &str,
+    new: &str,
+) -> Result<(), error::Error> {
+    let old_prefix = format!("({old}:");
+    let new_prefix = format!("({new}:");
+
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+    {
+        let md_path = entry.path();
+        let relative = md_path.strip_prefix(root).unwrap_or(md_path);
+        if !config.should_scan(&relative.to_string_lossy()) {
+            continue;
+        }
+
+        let content = std::fs::read_to_string(md_path)?;
+        if content.contains(&old_prefix) {
+            let updated = content.replace(&old_prefix, &new_prefix);
+            std::fs::write(md_path, updated)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Add a namespace mapping to the config file.

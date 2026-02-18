@@ -504,6 +504,53 @@ fn namespace_list_shows_configured_namespaces() {
 }
 
 #[test]
+fn namespace_rename_updates_config_lockfile_and_markdown() {
+    let (_tmp, dir) = isolated_fixture("namespaced");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir)
+        .args(["namespace", "rename", "auth", "authn"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "rename failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let config_content = std::fs::read_to_string(dir.join(".docref.toml")).unwrap();
+    assert!(
+        config_content.contains("authn"),
+        "config missing authn: {config_content}"
+    );
+
+    let lock_content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        lock_content.contains("authn:src/lib.rs"),
+        "lockfile missing authn: {lock_content}"
+    );
+    assert!(
+        !lock_content.contains("auth:src/lib.rs"),
+        "lockfile still has old auth: {lock_content}"
+    );
+
+    let md_content = std::fs::read_to_string(dir.join("docs/guide.md")).unwrap();
+    assert!(
+        md_content.contains("authn:src/lib.rs"),
+        "markdown missing authn: {md_content}"
+    );
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed after rename: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
 fn namespace_add_creates_mapping() {
     let (_tmp, dir) = isolated_fixture("basic");
 
