@@ -504,6 +504,44 @@ fn namespace_list_shows_configured_namespaces() {
 }
 
 #[test]
+fn namespace_add_creates_mapping() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    // basic fixture has no .docref.toml — create a minimal one.
+    std::fs::write(dir.join(".docref.toml"), "").unwrap();
+
+    let output = docref_at(&dir)
+        .args(["namespace", "add", "mylib", "packages/mylib"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "namespace add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let content = std::fs::read_to_string(dir.join(".docref.toml")).unwrap();
+    assert!(
+        content.contains("mylib"),
+        "config should contain namespace: {content}"
+    );
+    assert!(
+        content.contains("packages/mylib"),
+        "config should contain path: {content}"
+    );
+
+    let list = docref_at(&dir)
+        .args(["namespace", "list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("mylib"),
+        "list should show added namespace: {stdout}"
+    );
+}
+
+#[test]
 fn accept_file_updates_all_refs_in_doc() {
     let (_tmp, dir) = isolated_fixture("basic");
     let src = dir.join("src/lib.rs");

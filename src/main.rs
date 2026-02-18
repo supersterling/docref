@@ -58,6 +58,13 @@ enum Commands {
 enum NamespaceAction {
     /// List all configured namespaces
     List,
+    /// Add a namespace mapping
+    Add {
+        /// Namespace name
+        name: String,
+        /// Directory path (relative to config root)
+        path: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -80,6 +87,9 @@ fn main() -> ExitCode {
         Commands::Status => cmd_status().map(|()| ExitCode::SUCCESS),
         Commands::Namespace { action } => match action {
             NamespaceAction::List => cmd_namespace_list().map(|()| ExitCode::SUCCESS),
+            NamespaceAction::Add { name, path } => {
+                cmd_namespace_add(&name, &path).map(|()| ExitCode::SUCCESS)
+            },
         },
     };
 
@@ -420,6 +430,18 @@ fn resolve_and_hash_all_references(
     }
 
     Ok(entries)
+}
+
+/// Add a namespace mapping to the config file.
+///
+/// # Errors
+///
+/// Returns errors from config writing.
+fn cmd_namespace_add(name: &str, path: &str) -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    config::add_namespace(&root, name, path)?;
+    println!("Added namespace: {name} -> {path}");
+    Ok(())
 }
 
 /// List all configured namespaces.

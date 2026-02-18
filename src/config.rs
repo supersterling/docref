@@ -220,6 +220,34 @@ impl Config {
     }
 }
 
+/// Add a namespace mapping to `.docref.toml`.
+/// Creates the `[namespaces]` table if it doesn't exist.
+///
+/// # Errors
+///
+/// Returns `Error::ParseFailed` if the config can't be parsed,
+/// or `Error::Io` if writing fails.
+pub fn add_namespace(root: &Path, name: &str, namespace_path: &str) -> Result<(), Error> {
+    let config_path = root.join(".docref.toml");
+    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+
+    let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e: toml_edit::TomlError| {
+        Error::ParseFailed {
+            file: config_path.clone(),
+            reason: e.to_string(),
+        }
+    })?;
+
+    if !doc.contains_key("namespaces") {
+        doc["namespaces"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+
+    doc["namespaces"][name] = toml_edit::value(namespace_path);
+
+    std::fs::write(&config_path, doc.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::missing_panics_doc)]
 mod tests {
