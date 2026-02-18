@@ -4,10 +4,13 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 
 /// A namespace mapping from a config file, binding a short prefix
-/// to a relative directory path.
+/// to a relative directory path. The `config_root` tracks which config
+/// directory defined this namespace, so paths can be resolved correctly
+/// when running from a sub-project that extends a parent config.
 #[derive(Debug)]
 pub struct NamespaceEntry {
     pub path: String,
+    pub config_root: PathBuf,
 }
 
 /// Project configuration loaded from `.docref.toml`.
@@ -45,20 +48,29 @@ impl Config {
     /// doesn't exist.
     pub fn load(root: &Path) -> Result<Self, Error> {
         let mut chain = Vec::new();
-        Self::load_recursive(root, &mut chain)
+        let namespace_base = PathBuf::new();
+        Self::load_recursive(root, &namespace_base, &mut chain)
     }
 
+    /// Load config recursively. `namespace_base` is the relative path from the
+    /// original load root to this config's directory, used as `config_root` for
+    /// any namespaces defined here.
+    ///
     /// # Errors
     ///
     /// Propagates IO, TOML, cycle, and not-found errors from the extends chain.
-    fn load_recursive(root: &Path, chain: &mut Vec<PathBuf>) -> Result<Self, Error> {
+    fn load_recursive(
+        root: &Path,
+        namespace_base: &Path,
+        chain: &mut Vec<PathBuf>,
+    ) -> Result<Self, Error> {
         let raw = Self::read_toml(root)?;
         let Some(raw) = raw else {
             return Ok(Self::scan_everything_by_default());
         };
 
-        let parent_namespaces = Self::load_parent(raw.extends.as_ref(), root, chain)?;
-        let namespaces = Self::merge_namespaces(parent_namespaces, raw.namespaces);
+        let parent_namespaces = Self::load_parent(raw.extends.as_ref(), root, namespace_base, chain)?;
+        let namespaces = Self::merge_namespaces(parent_namespaces, raw.namespaces, namespace_base);
 
         Ok(Self {
             include: raw.include,
@@ -94,18 +106,19 @@ impl Config {
     fn load_parent(
         extends: Option<&String>,
         root: &Path,
+        namespace_base: &Path,
         chain: &mut Vec<PathBuf>,
     ) -> Result<HashMap<String, NamespaceEntry>, Error> {
         let Some(extends_rel) = extends else {
             return Ok(HashMap::new());
         };
 
-        let parent_path = root.join(extends_rel);
-        if !parent_path.exists() {
-            return Err(Error::ConfigNotFound { path: parent_path });
+        let parent_config = root.join(extends_rel);
+        if !parent_config.exists() {
+            return Err(Error::ConfigNotFound { path: parent_config });
         }
 
-        let canonical = std::fs::canonicalize(&parent_path)?;
+        let canonical = std::fs::canonicalize(&parent_config)?;
         if chain.contains(&canonical) {
             chain.push(canonical);
             return Err(Error::ConfigCycle {
@@ -114,22 +127,39 @@ impl Config {
         }
         chain.push(canonical);
 
-        let parent_dir = parent_path
+        let parent_dir = parent_config
             .parent()
             .ok_or_else(|| Error::ConfigNotFound {
-                path: parent_path.clone(),
+                path: parent_config.clone(),
             })?;
-        let parent = Self::load_recursive(parent_dir, chain)?;
+
+        // Compute the parent's namespace_base relative to the original load root.
+        // extends_rel points from the child to the parent config file, so the
+        // parent directory is the extends path minus the filename component.
+        let extends_path = Path::new(extends_rel.as_str());
+        let parent_namespace_base = match extends_path.parent() {
+            Some(p) if p.as_os_str().is_empty() => namespace_base.to_path_buf(),
+            Some(rel_to_child) => namespace_base.join(rel_to_child),
+            None => namespace_base.to_path_buf(),
+        };
+
+        let parent = Self::load_recursive(parent_dir, &parent_namespace_base, chain)?;
         Ok(parent.namespaces)
     }
 
     /// Merge parent namespaces with child overrides. Child entries win on conflict.
+    /// Each child entry records `child_root` so its path resolves relative to the
+    /// config that defined it.
     fn merge_namespaces(
         mut base: HashMap<String, NamespaceEntry>,
         child_raw: HashMap<String, String>,
+        child_root: &Path,
     ) -> HashMap<String, NamespaceEntry> {
         for (name, path) in child_raw {
-            base.insert(name, NamespaceEntry { path });
+            base.insert(name, NamespaceEntry {
+                path,
+                config_root: child_root.to_path_buf(),
+            });
         }
         base
     }
@@ -164,7 +194,7 @@ impl Config {
             }
         })?;
 
-        Ok(PathBuf::from(&entry.path).join(path))
+        Ok(entry.config_root.join(&entry.path).join(path))
     }
 
     /// Check whether a markdown file path should be scanned.
@@ -273,10 +303,12 @@ auth = "services/auth"
         let config = Config::load(&child).unwrap();
         assert_eq!(config.namespaces.len(), 2);
 
+        // Parent namespace resolves relative to the parent's config root,
+        // which is ../../ from the child directory.
         let resolved = config
             .resolve_target(&PathBuf::from("auth:src/lib.rs"))
             .unwrap();
-        assert_eq!(resolved, PathBuf::from("services/auth/src/lib.rs"));
+        assert_eq!(resolved, PathBuf::from("../../services/auth/src/lib.rs"));
     }
 
     #[test]

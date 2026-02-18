@@ -1,3 +1,5 @@
+#![allow(clippy::missing_panics_doc)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -251,7 +253,7 @@ fn resolve_lists_symbols_in_rust_file() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("A"), "should list constant A: {stdout}");
+    assert!(stdout.contains('A'), "should list constant A: {stdout}");
     assert!(stdout.contains("add"), "should list function add: {stdout}");
 }
 
@@ -304,7 +306,7 @@ fn status_shows_all_references() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should list all tracked references.
-    assert!(stdout.contains("lib.rs") && stdout.contains("A"), "missing A: {stdout}");
+    assert!(stdout.contains("lib.rs") && stdout.contains('A'), "missing A: {stdout}");
     assert!(stdout.contains("lib.rs") && stdout.contains("add"), "missing add: {stdout}");
     assert!(
         stdout.contains("app.ts") && stdout.contains("VERSION"),
@@ -447,6 +449,37 @@ fn config_excludes_directories() {
     assert!(
         !content.contains("ignored.md"),
         "should exclude docs/external/: {content}"
+    );
+}
+
+#[test]
+fn extends_inherits_parent_namespaces() {
+    let (_tmp, dir) = isolated_fixture("monorepo");
+
+    // Run docref from the sub-project directory.
+    let web_dir = dir.join("services/web");
+    let init = docref_at(&web_dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let content = std::fs::read_to_string(web_dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("shared:src/lib.rs"),
+        "lockfile should use inherited namespace: {content}"
+    );
+    assert!(
+        content.contains("greet"),
+        "lockfile should contain greet symbol: {content}"
+    );
+
+    let check = docref_at(&web_dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
     );
 }
 

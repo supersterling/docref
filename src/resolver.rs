@@ -464,6 +464,7 @@ fn slugify(text: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::missing_panics_doc)]
 mod tests {
     use super::slugify;
 
