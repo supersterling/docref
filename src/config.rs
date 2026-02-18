@@ -4,11 +4,10 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 
 /// A namespace mapping from a config file, binding a short prefix
-/// to a relative directory path and the config root that defined it.
+/// to a relative directory path.
 #[derive(Debug)]
 pub struct NamespaceEntry {
     pub path: String,
-    pub config_root: PathBuf,
 }
 
 /// Project configuration loaded from `.docref.toml`.
@@ -59,7 +58,7 @@ impl Config {
         };
 
         let parent_namespaces = Self::load_parent(raw.extends.as_ref(), root, chain)?;
-        let namespaces = Self::merge_namespaces(parent_namespaces, raw.namespaces, root);
+        let namespaces = Self::merge_namespaces(parent_namespaces, raw.namespaces);
 
         Ok(Self {
             include: raw.include,
@@ -128,16 +127,9 @@ impl Config {
     fn merge_namespaces(
         mut base: HashMap<String, NamespaceEntry>,
         child_raw: HashMap<String, String>,
-        child_root: &Path,
     ) -> HashMap<String, NamespaceEntry> {
         for (name, path) in child_raw {
-            base.insert(
-                name,
-                NamespaceEntry {
-                    path,
-                    config_root: child_root.to_path_buf(),
-                },
-            );
+            base.insert(name, NamespaceEntry { path });
         }
         base
     }

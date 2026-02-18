@@ -89,7 +89,7 @@ fn cmd_init() -> Result<(), error::Error> {
 
     let config = config::Config::load(&root)?;
     let grouped = scanner::scan(&root, &config)?;
-    let entries = resolve_and_hash_all_references(&root, &grouped)?;
+    let entries = resolve_and_hash_all_references(&root, &config, &grouped)?;
     let lockfile = Lockfile::new(entries);
 
     lockfile.write(&lock_path)?;
@@ -108,12 +108,13 @@ fn cmd_check() -> Result<ExitCode, error::Error> {
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
 
+    let config = config::Config::load(&root)?;
     let lockfile = Lockfile::read(&lock_path)?;
     let mut stale_count = 0u32;
     let mut broken_count = 0u32;
 
     for entry in &lockfile.entries {
-        match compare_lockfile_entry_against_source(&root, entry)? {
+        match compare_lockfile_entry_against_source(&root, &config, entry)? {
             CheckResult::Fresh => {},
             CheckResult::Stale => stale_count += 1,
             CheckResult::Broken(reason) => {
@@ -154,10 +155,11 @@ fn cmd_status() -> Result<(), error::Error> {
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
 
+    let config = config::Config::load(&root)?;
     let lockfile = Lockfile::read(&lock_path)?;
 
     for entry in &lockfile.entries {
-        let label = match compare_lockfile_entry_against_source(&root, entry)? {
+        let label = match compare_lockfile_entry_against_source(&root, &config, entry)? {
             CheckResult::Fresh => "FRESH ",
             CheckResult::Stale => "STALE ",
             CheckResult::Broken(reason) => {
@@ -212,14 +214,16 @@ fn cmd_accept(reference: &str) -> Result<(), error::Error> {
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
 
+    let config = config::Config::load(&root)?;
     let (file, symbol) = split_file_hash_symbol_reference(reference)?;
     let mut lockfile = Lockfile::read(&lock_path)?;
 
-    let source = std::fs::read_to_string(root.join(&file))
-        .map_err(|_| error::Error::FileNotFound { path: file.clone() })?;
-    let language = grammar::language_for_path(&file)?;
+    let disk_path = config.resolve_target(&file)?;
+    let source = std::fs::read_to_string(root.join(&disk_path))
+        .map_err(|_| error::Error::FileNotFound { path: disk_path.clone() })?;
+    let language = grammar::language_for_path(&disk_path)?;
     let query = parse_lockfile_symbol_as_query(&symbol);
-    let resolved = resolver::resolve(&file, &source, &language, &query)?;
+    let resolved = resolver::resolve(&disk_path, &source, &language, &query)?;
     let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
 
     let mut updated = false;
@@ -254,6 +258,7 @@ fn cmd_accept_file(source_file: &str) -> Result<(), error::Error> {
     let lock_path = root.join(".docref.lock");
     let source_path = PathBuf::from(source_file);
 
+    let config = config::Config::load(&root)?;
     let mut lockfile = Lockfile::read(&lock_path)?;
 
     // Collect indices of entries matching this source file.
@@ -280,15 +285,16 @@ fn cmd_accept_file(source_file: &str) -> Result<(), error::Error> {
 
     // Re-resolve and re-hash each group, parsing each target file once.
     for (target, indices) in &by_target {
-        let target_path = root.join(target);
+        let disk_path = config.resolve_target(target)?;
+        let target_path = root.join(&disk_path);
         let source = std::fs::read_to_string(&target_path)
             .map_err(|_| error::Error::FileNotFound { path: target_path })?;
-        let language = grammar::language_for_path(target)?;
+        let language = grammar::language_for_path(&disk_path)?;
 
         for &idx in indices {
             let symbol = &lockfile.entries[idx].symbol;
             let query = parse_lockfile_symbol_as_query(symbol);
-            let resolved = resolver::resolve(target, &source, &language, &query)?;
+            let resolved = resolver::resolve(&disk_path, &source, &language, &query)?;
             let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
             lockfile.entries[idx].hash = new_hash;
         }
@@ -328,18 +334,25 @@ enum CheckResult {
 /// # Errors
 ///
 /// Returns errors from resolution or hashing that aren't recoverable as broken/stale.
-fn compare_lockfile_entry_against_source(root: &Path, entry: &LockEntry) -> Result<CheckResult, error::Error> {
-    let target_path = root.join(&entry.target);
+fn compare_lockfile_entry_against_source(
+    root: &Path,
+    config: &config::Config,
+    entry: &LockEntry,
+) -> Result<CheckResult, error::Error> {
+    let Ok(disk_path) = config.resolve_target(&entry.target) else {
+        return Ok(CheckResult::Broken("unknown namespace"));
+    };
+    let target_path = root.join(&disk_path);
     let Ok(source) = std::fs::read_to_string(&target_path) else {
         return Ok(CheckResult::Broken("file not found"));
     };
 
-    let Ok(language) = grammar::language_for_path(&entry.target) else {
+    let Ok(language) = grammar::language_for_path(&disk_path) else {
         return Ok(CheckResult::Broken("unsupported language"));
     };
 
     let query = parse_lockfile_symbol_as_query(&entry.symbol);
-    let resolved = match resolver::resolve(&entry.target, &source, &language, &query) {
+    let resolved = match resolver::resolve(&disk_path, &source, &language, &query) {
         Ok(r) => r,
         Err(error::Error::SymbolNotFound { .. }) => {
             return Ok(CheckResult::Broken("symbol removed"));
@@ -364,21 +377,23 @@ fn compare_lockfile_entry_against_source(root: &Path, entry: &LockEntry) -> Resu
 /// Returns errors from file reading, language detection, resolution, or hashing.
 fn resolve_and_hash_all_references(
     root: &Path,
+    config: &config::Config,
     grouped: &HashMap<PathBuf, Vec<Reference>>,
 ) -> Result<Vec<LockEntry>, error::Error> {
     let mut entries = Vec::new();
 
     for (target, refs) in grouped {
-        let target_path = root.join(target);
+        let disk_path = config.resolve_target(target)?;
+        let target_path = root.join(&disk_path);
         let source =
             std::fs::read_to_string(&target_path).map_err(|_| error::Error::FileNotFound {
                 path: target_path.clone(),
             })?;
 
-        let language = grammar::language_for_path(target)?;
+        let language = grammar::language_for_path(&disk_path)?;
 
         for reference in refs {
-            let resolved = resolver::resolve(target, &source, &language, &reference.symbol)?;
+            let resolved = resolver::resolve(&disk_path, &source, &language, &reference.symbol)?;
             let hash = hasher::hash_symbol(&source, &language, &resolved)?;
 
             entries.push(LockEntry {
