@@ -378,6 +378,57 @@ fn ambiguous_bare_symbol_errors_with_candidates() {
 }
 
 #[test]
+fn namespaced_references_resolve_and_check() {
+    let (_tmp, dir) = isolated_fixture("namespaced");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Lockfile should contain the namespace-prefixed target.
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("auth:src/lib.rs"),
+        "lockfile should preserve namespace form: {content}"
+    );
+    assert!(
+        content.contains("validate"),
+        "lockfile should contain validate symbol: {content}"
+    );
+    // Also contains the local non-namespaced reference.
+    assert!(
+        content.contains("\"src/lib.rs\""),
+        "lockfile should contain local ref: {content}"
+    );
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
+fn namespaced_reference_detects_stale() {
+    let (_tmp, dir) = isolated_fixture("namespaced");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Modify the namespaced target.
+    let auth_src = dir.join("services/auth/src/lib.rs");
+    std::fs::write(&auth_src, "pub fn validate(input: &str) -> bool {\n    input.len() > 3\n}\n").unwrap();
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    assert_eq!(code, 1, "expected stale after modifying namespaced target");
+}
+
+#[test]
 fn config_excludes_directories() {
     let (_tmp, dir) = isolated_fixture("configured");
 
