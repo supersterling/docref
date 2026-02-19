@@ -3,37 +3,18 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 
-/// A namespace mapping from a config file, binding a short prefix
-/// to a relative directory path. The `config_root` tracks which config
-/// directory defined this namespace, so paths can be resolved correctly
-/// when running from a sub-project that extends a parent config.
-#[derive(Debug)]
-pub struct NamespaceEntry {
-    pub path: String,
-    pub config_root: PathBuf,
-}
-
 /// Project configuration loaded from `.docref.toml`.
+///
 /// Include/exclude patterns are path prefixes applied to markdown source files.
 /// Namespaces map short prefixes to directory paths for cross-project references.
 #[derive(Debug)]
 pub struct Config {
-    include: Vec<String>,
+    /// Path prefixes to exclude from scanning.
     exclude: Vec<String>,
+    /// Path prefixes to include when scanning.
+    include: Vec<String>,
+    /// Namespace prefix-to-directory mappings.
     pub namespaces: HashMap<String, NamespaceEntry>,
-}
-
-/// Raw TOML structure for `.docref.toml`.
-#[derive(serde::Deserialize)]
-struct DocrefTomlConfig {
-    #[serde(default)]
-    extends: Option<String>,
-    #[serde(default)]
-    include: Vec<String>,
-    #[serde(default)]
-    exclude: Vec<String>,
-    #[serde(default)]
-    namespaces: HashMap<String, String>,
 }
 
 impl Config {
@@ -49,50 +30,7 @@ impl Config {
     pub fn load(root: &Path) -> Result<Self, Error> {
         let mut chain = Vec::new();
         let namespace_base = PathBuf::new();
-        Self::load_recursive(root, &namespace_base, &mut chain)
-    }
-
-    /// Load config recursively. `namespace_base` is the relative path from the
-    /// original load root to this config's directory, used as `config_root` for
-    /// any namespaces defined here.
-    ///
-    /// # Errors
-    ///
-    /// Propagates IO, TOML, cycle, and not-found errors from the extends chain.
-    fn load_recursive(
-        root: &Path,
-        namespace_base: &Path,
-        chain: &mut Vec<PathBuf>,
-    ) -> Result<Self, Error> {
-        let raw = Self::read_toml(root)?;
-        let Some(raw) = raw else {
-            return Ok(Self::scan_everything_by_default());
-        };
-
-        let parent_namespaces = Self::load_parent(raw.extends.as_ref(), root, namespace_base, chain)?;
-        let namespaces = Self::merge_namespaces(parent_namespaces, raw.namespaces, namespace_base);
-
-        Ok(Self {
-            include: raw.include,
-            exclude: raw.exclude,
-            namespaces,
-        })
-    }
-
-    /// Read and parse `.docref.toml`, returning `None` if the file doesn't exist.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Error::Io` on read failure or `Error::TomlDe` on parse failure.
-    fn read_toml(root: &Path) -> Result<Option<DocrefTomlConfig>, Error> {
-        let path = root.join(".docref.toml");
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(Error::Io(e)),
-        };
-        let raw: DocrefTomlConfig = toml::from_str(&content)?;
-        Ok(Some(raw))
+        return Self::load_recursive(root, &namespace_base, &mut chain);
     }
 
     /// If `extends` is set, validate the path, detect cycles, and recursively
@@ -115,7 +53,9 @@ impl Config {
 
         let parent_config = root.join(extends_rel);
         if !parent_config.exists() {
-            return Err(Error::ConfigNotFound { path: parent_config });
+            return Err(Error::ConfigNotFound {
+                path: parent_config,
+            });
         }
 
         let canonical = std::fs::canonicalize(&parent_config)?;
@@ -129,8 +69,10 @@ impl Config {
 
         let parent_dir = parent_config
             .parent()
-            .ok_or_else(|| Error::ConfigNotFound {
-                path: parent_config.clone(),
+            .ok_or_else(|| {
+                return Error::ConfigNotFound {
+                    path: parent_config.clone(),
+                };
             })?;
 
         // Compute the parent's namespace_base relative to the original load root.
@@ -144,7 +86,35 @@ impl Config {
         };
 
         let parent = Self::load_recursive(parent_dir, &parent_namespace_base, chain)?;
-        Ok(parent.namespaces)
+        return Ok(parent.namespaces);
+    }
+
+    /// Load config recursively. `namespace_base` is the relative path from the
+    /// original load root to this config's directory, used as `config_root` for
+    /// any namespaces defined here.
+    ///
+    /// # Errors
+    ///
+    /// Propagates IO, TOML, cycle, and not-found errors from the extends chain.
+    fn load_recursive(
+        root: &Path,
+        namespace_base: &Path,
+        chain: &mut Vec<PathBuf>,
+    ) -> Result<Self, Error> {
+        let raw = Self::read_toml(root)?;
+        let Some(raw) = raw else {
+            return Ok(Self::scan_everything_by_default());
+        };
+
+        let parent_namespaces =
+            Self::load_parent(raw.extends.as_ref(), root, namespace_base, chain)?;
+        let namespaces = Self::merge_namespaces(parent_namespaces, raw.namespaces, namespace_base);
+
+        return Ok(Self {
+            exclude: raw.exclude,
+            include: raw.include,
+            namespaces,
+        });
     }
 
     /// Merge parent namespaces with child overrides. Child entries win on conflict.
@@ -156,24 +126,35 @@ impl Config {
         child_root: &Path,
     ) -> HashMap<String, NamespaceEntry> {
         for (name, path) in child_raw {
-            base.insert(name, NamespaceEntry {
-                path,
-                config_root: child_root.to_path_buf(),
-            });
+            base.insert(
+                name,
+                NamespaceEntry {
+                    config_root: child_root.to_path_buf(),
+                    path,
+                },
+            );
         }
-        base
+        return base;
     }
 
-    /// Default config that includes everything and excludes nothing.
-    fn scan_everything_by_default() -> Self {
-        Self {
-            include: Vec::new(),
-            exclude: Vec::new(),
-            namespaces: HashMap::new(),
-        }
+    /// Read and parse `.docref.toml`, returning `None` if the file doesn't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Io` on read failure or `Error::TomlDe` on parse failure.
+    fn read_toml(root: &Path) -> Result<Option<DocrefTomlConfig>, Error> {
+        let path = root.join(".docref.toml");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(Error::Io(e)),
+        };
+        let raw: DocrefTomlConfig = toml::from_str(&content)?;
+        return Ok(Some(raw));
     }
 
     /// Resolve a potentially namespace-prefixed target to a relative path.
+    ///
     /// Targets like `auth:src/lib.rs` are split on the first `:` and the
     /// namespace prefix is replaced with the mapped directory. Plain paths
     /// pass through unchanged.
@@ -189,12 +170,21 @@ impl Config {
         };
 
         let entry = self.namespaces.get(namespace).ok_or_else(|| {
-            Error::UnknownNamespace {
+            return Error::UnknownNamespace {
                 name: namespace.to_string(),
-            }
+            };
         })?;
 
-        Ok(entry.config_root.join(&entry.path).join(path))
+        return Ok(entry.config_root.join(&entry.path).join(path));
+    }
+
+    /// Default config that includes everything and excludes nothing.
+    fn scan_everything_by_default() -> Self {
+        return Self {
+            exclude: Vec::new(),
+            include: Vec::new(),
+            namespaces: HashMap::new(),
+        };
     }
 
     /// Check whether a markdown file path should be scanned.
@@ -207,109 +197,55 @@ impl Config {
             || self
                 .include
                 .iter()
-                .any(|p| relative_path.starts_with(p.as_str()));
+                .any(|p| return relative_path.starts_with(p.as_str()));
 
         if !included {
             return false;
         }
 
-        !self
+        return !self
             .exclude
             .iter()
-            .any(|p| relative_path.starts_with(p.as_str()))
+            .any(|p| return relative_path.starts_with(p.as_str()));
     }
 }
 
+/// Raw TOML structure for `.docref.toml`.
+#[derive(serde::Deserialize)]
+struct DocrefTomlConfig {
+    /// Glob patterns for paths to exclude.
+    #[serde(default)]
+    exclude: Vec<String>,
+    /// Path to a parent config file to inherit from.
+    #[serde(default)]
+    extends: Option<String>,
+    /// Glob patterns for paths to include.
+    #[serde(default)]
+    include: Vec<String>,
+    /// Namespace prefix-to-path mappings.
+    #[serde(default)]
+    namespaces: HashMap<String, String>,
+}
+
+/// A namespace mapping from a config file.
+///
+/// Binds a short prefix to a relative directory path. The `config_root`
+/// tracks which config directory defined this namespace, so paths can be
+/// resolved correctly when running from a sub-project that extends a
+/// parent config.
+#[derive(Debug)]
+pub struct NamespaceEntry {
+    /// The filesystem root of the config that defined this entry.
+    pub config_root: PathBuf,
+    /// Relative directory path the namespace maps to.
+    pub path: String,
+}
+
 #[cfg(test)]
-#[allow(clippy::missing_panics_doc)]
+#[allow(clippy::missing_panics_doc, reason = "test code uses unwrap freely")]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-
-    #[test]
-    fn loads_namespaces_from_config() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            tmp.path().join(".docref.toml"),
-            r#"
-[namespaces]
-auth = "services/auth"
-shared = "packages/shared"
-"#,
-        )
-        .unwrap();
-
-        let config = Config::load(tmp.path()).unwrap();
-        assert_eq!(config.namespaces.len(), 2);
-    }
-
-    #[test]
-    fn resolve_target_with_namespace() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            tmp.path().join(".docref.toml"),
-            r#"
-[namespaces]
-auth = "services/auth"
-"#,
-        )
-        .unwrap();
-
-        let config = Config::load(tmp.path()).unwrap();
-        let resolved = config
-            .resolve_target(&PathBuf::from("auth:src/lib.rs"))
-            .unwrap();
-        assert_eq!(resolved, PathBuf::from("services/auth/src/lib.rs"));
-    }
-
-    #[test]
-    fn resolve_target_without_namespace() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let config = Config::load(tmp.path()).unwrap();
-        let resolved = config
-            .resolve_target(&PathBuf::from("src/lib.rs"))
-            .unwrap();
-        assert_eq!(resolved, PathBuf::from("src/lib.rs"));
-    }
-
-    #[test]
-    fn resolve_target_unknown_namespace_errors() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let config = Config::load(tmp.path()).unwrap();
-        let result = config.resolve_target(&PathBuf::from("nope:src/lib.rs"));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn extends_inherits_parent_namespaces() {
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        let root = tmp.path().join("root");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join(".docref.toml"),
-            "[namespaces]\nauth = \"services/auth\"\nshared = \"packages/shared\"\n",
-        )
-        .unwrap();
-
-        let child = tmp.path().join("root/services/web");
-        std::fs::create_dir_all(&child).unwrap();
-        std::fs::write(
-            child.join(".docref.toml"),
-            "extends = \"../../.docref.toml\"\ninclude = [\"docs/\"]\n",
-        )
-        .unwrap();
-
-        let config = Config::load(&child).unwrap();
-        assert_eq!(config.namespaces.len(), 2);
-
-        // Parent namespace resolves relative to the parent's config root,
-        // which is ../../ from the child directory.
-        let resolved = config
-            .resolve_target(&PathBuf::from("auth:src/lib.rs"))
-            .unwrap();
-        assert_eq!(resolved, PathBuf::from("../../services/auth/src/lib.rs"));
-    }
 
     #[test]
     fn child_namespace_overrides_parent() {
@@ -365,6 +301,37 @@ auth = "services/auth"
     }
 
     #[test]
+    fn extends_inherits_parent_namespaces() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".docref.toml"),
+            "[namespaces]\nauth = \"services/auth\"\nshared = \"packages/shared\"\n",
+        )
+        .unwrap();
+
+        let child = tmp.path().join("root/services/web");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(
+            child.join(".docref.toml"),
+            "extends = \"../../.docref.toml\"\ninclude = [\"docs/\"]\n",
+        )
+        .unwrap();
+
+        let config = Config::load(&child).unwrap();
+        assert_eq!(config.namespaces.len(), 2);
+
+        // Parent namespace resolves relative to the parent's config root,
+        // which is ../../ from the child directory.
+        let resolved = config
+            .resolve_target(&PathBuf::from("auth:src/lib.rs"))
+            .unwrap();
+        assert_eq!(resolved, PathBuf::from("../../services/auth/src/lib.rs"));
+    }
+
+    #[test]
     fn extends_target_not_found_errors() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::write(
@@ -375,5 +342,59 @@ auth = "services/auth"
 
         let result = Config::load(tmp.path());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn loads_namespaces_from_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join(".docref.toml"),
+            r#"
+[namespaces]
+auth = "services/auth"
+shared = "packages/shared"
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load(tmp.path()).unwrap();
+        assert_eq!(config.namespaces.len(), 2);
+    }
+
+    #[test]
+    fn resolve_target_unknown_namespace_errors() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = Config::load(tmp.path()).unwrap();
+        let result = config.resolve_target(&PathBuf::from("nope:src/lib.rs"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_target_with_namespace() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join(".docref.toml"),
+            r#"
+[namespaces]
+auth = "services/auth"
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load(tmp.path()).unwrap();
+        let resolved = config
+            .resolve_target(&PathBuf::from("auth:src/lib.rs"))
+            .unwrap();
+        assert_eq!(resolved, PathBuf::from("services/auth/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_target_without_namespace() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = Config::load(tmp.path()).unwrap();
+        let resolved = config
+            .resolve_target(&PathBuf::from("src/lib.rs"))
+            .unwrap();
+        assert_eq!(resolved, PathBuf::from("src/lib.rs"));
     }
 }

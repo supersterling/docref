@@ -1,3 +1,4 @@
+/// Tree-sitter grammar resolution by file extension.
 use std::path::Path;
 
 use tree_sitter::Language;
@@ -10,9 +11,9 @@ use crate::error::Error;
 ///
 /// Returns `Error::UnsupportedLanguage` for unknown extensions.
 pub fn language_for_path(path: &Path) -> Result<Language, Error> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let ext = path.extension().and_then(|e| return e.to_str()).unwrap_or("");
 
-    match ext {
+    return match ext {
         "rs" => Ok(tree_sitter_rust::LANGUAGE.into()),
         "ts" => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         "tsx" => Ok(tree_sitter_typescript::LANGUAGE_TSX.into()),
@@ -20,5 +21,5 @@ pub fn language_for_path(path: &Path) -> Result<Language, Error> {
         _ => Err(Error::UnsupportedLanguage {
             ext: ext.to_string(),
         }),
-    }
+    };
 }
