@@ -1,6 +1,14 @@
 use std::fmt::Write as _;
 
 use crate::error::Error;
+use crate::types::SourceRef;
+
+/// Render an error as terminal-formatted markdown and print to stderr.
+pub fn print_error(e: &Error) {
+    let md = render_error(e);
+    let skin = termimad::MadSkin::default();
+    eprintln!("{}", skin.term_text(&md));
+}
 
 /// Render an error as a structured markdown diagnostic.
 ///
@@ -9,8 +17,8 @@ use crate::error::Error;
 pub fn render_error(e: &Error) -> String {
     match e {
         Error::LockfileNotFound { .. } => render_lockfile_not_found(),
-        Error::SymbolNotFound { file, symbol, suggestions } => {
-            render_symbol_not_found(&file.display().to_string(), symbol, suggestions)
+        Error::SymbolNotFound { file, symbol, suggestions, referenced_from } => {
+            render_symbol_not_found(&file.display().to_string(), symbol, suggestions, referenced_from)
         },
         Error::AmbiguousSymbol { file, symbol, candidates } => {
             render_ambiguous_symbol(&file.display().to_string(), symbol, candidates)
@@ -76,19 +84,30 @@ Run `docref init` to scan markdown and generate the lockfile:
     .to_string()
 }
 
-fn render_symbol_not_found(file: &str, symbol: &str, suggestions: &[String]) -> String {
+fn render_symbol_not_found(
+    file: &str,
+    symbol: &str,
+    suggestions: &[String],
+    referenced_from: &[SourceRef],
+) -> String {
     let mut out = format!(
         "# Error: Symbol Not Found\n\nSymbol `{symbol}` does not exist in `{file}`.\n"
     );
 
-    if !suggestions.is_empty() {
-        let list = suggestions
-            .iter()
-            .map(|s| format!("`{s}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
+    if !referenced_from.is_empty() {
         out.push('\n');
-        let _ = writeln!(out, "## Available symbols\n\n{list}");
+        let _ = writeln!(out, "## Referenced from\n");
+        for src in referenced_from {
+            let _ = writeln!(out, "- {}:{}", src.file.display(), src.line);
+        }
+    }
+
+    if !suggestions.is_empty() {
+        out.push('\n');
+        let _ = writeln!(out, "## Available symbols\n");
+        for s in suggestions {
+            let _ = writeln!(out, "- `{s}`");
+        }
     }
 
     out.push('\n');

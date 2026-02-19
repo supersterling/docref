@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct Reference {
     pub source: PathBuf,
+    pub source_line: u32,
     pub target: PathBuf,
     pub symbol: SymbolQuery,
 }
@@ -30,6 +31,14 @@ impl SymbolQuery {
             } => format!("{parent}.{child}"),
         }
     }
+}
+
+/// Location in a markdown file that references a symbol.
+/// Used in error diagnostics to show where a broken reference originated.
+#[derive(Debug, Clone)]
+pub struct SourceRef {
+    pub file: PathBuf,
+    pub line: u32,
 }
 
 /// Output of successful symbol resolution. Byte range is guaranteed

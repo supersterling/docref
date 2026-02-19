@@ -300,6 +300,7 @@ fn find_declaration_by_bare_name(
                 file: file_path.to_path_buf(),
                 symbol: name.to_string(),
                 suggestions,
+                referenced_from: vec![],
             })
         },
         1 => Ok(declaration_to_resolved_symbol(matches[0])),
@@ -341,6 +342,7 @@ fn find_declaration_by_qualified_dotpath(
                 file: file_path.to_path_buf(),
                 symbol: qualified,
                 suggestions,
+                referenced_from: vec![],
             }
         })
 }

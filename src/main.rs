@@ -176,7 +176,7 @@ fn main() -> ExitCode {
     match result {
         Ok(code) => code,
         Err(e) => {
-            eprint!("{}", diagnostics::render_error(&e));
+            diagnostics::print_error(&e);
             ExitCode::from(3)
         },
     }

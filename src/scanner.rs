@@ -50,20 +50,22 @@ fn extract_references_from_markdown_content(
     pattern: &Regex,
     grouped: &mut HashMap<PathBuf, Vec<Reference>>,
 ) {
-    for line in content.lines() {
-        extract_references_from_markdown_line(line, source, pattern, grouped);
+    for (idx, line) in content.lines().enumerate() {
+        let line_number = u32::try_from(idx).unwrap_or(u32::MAX).saturating_add(1);
+        extract_references_from_markdown_line(line, line_number, source, pattern, grouped);
     }
 }
 
 /// Extract references from a single markdown line.
 fn extract_references_from_markdown_line(
     line: &str,
+    line_number: u32,
     source: &Path,
     pattern: &Regex,
     grouped: &mut HashMap<PathBuf, Vec<Reference>>,
 ) {
     for cap in pattern.captures_iter(line) {
-        let Some(reference) = parse_markdown_link_capture(&cap, source) else {
+        let Some(reference) = parse_markdown_link_capture(&cap, source, line_number) else {
             continue;
         };
         let target = reference.target.clone();
@@ -102,7 +104,7 @@ fn push_normalized_component<'a>(
 
 /// Try to parse a regex capture into a local code reference.
 /// Returns `None` for external URLs or empty fragments.
-fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path) -> Option<Reference> {
+fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path, line_number: u32) -> Option<Reference> {
     let raw_target = &cap[2];
     let raw_symbol = &cap[3];
 
@@ -127,6 +129,7 @@ fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path) -> Option<Refe
 
     Some(Reference {
         source: source.to_path_buf(),
+        source_line: line_number,
         target,
         symbol,
     })
@@ -155,11 +158,12 @@ mod tests {
         let source = Path::new("docs/guide.md");
         let line = "See [`validate`](auth:src/lib.rs#validate) for details.";
         let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
-        extract_references_from_markdown_line(line, source, &pattern, &mut grouped);
+        extract_references_from_markdown_line(line, 7, source, &pattern, &mut grouped);
 
         let refs: Vec<&Reference> = grouped.values().flatten().collect();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, PathBuf::from("auth:src/lib.rs"));
+        assert_eq!(refs[0].source_line, 7);
     }
 
     #[test]
@@ -168,10 +172,11 @@ mod tests {
         let source = Path::new("docs/guide.md");
         let line = "See [`add`](../src/lib.rs#add) for details.";
         let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
-        extract_references_from_markdown_line(line, source, &pattern, &mut grouped);
+        extract_references_from_markdown_line(line, 1, source, &pattern, &mut grouped);
 
         let refs: Vec<&Reference> = grouped.values().flatten().collect();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, PathBuf::from("src/lib.rs"));
+        assert_eq!(refs[0].source_line, 1);
     }
 }

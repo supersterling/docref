@@ -191,6 +191,7 @@ pub fn update(reference: &str) -> Result<(), error::Error> {
             file,
             symbol,
             suggestions: vec![],
+            referenced_from: vec![],
         });
     }
 

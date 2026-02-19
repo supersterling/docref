@@ -7,7 +7,7 @@ use crate::grammar;
 use crate::hasher;
 use crate::lockfile::LockEntry;
 use crate::resolver;
-use crate::types::{Reference, SymbolQuery};
+use crate::types::{Reference, SourceRef, SymbolQuery};
 
 /// Result of checking a single lockfile entry.
 pub enum CheckResult {
@@ -79,7 +79,8 @@ pub fn resolve_and_hash_all_references(
         let language = grammar::language_for_path(&disk_path)?;
 
         for reference in refs {
-            let resolved = resolver::resolve(&disk_path, &source, &language, &reference.symbol)?;
+            let resolved = resolver::resolve(&disk_path, &source, &language, &reference.symbol)
+                .map_err(|e| enrich_with_source_locations(e, refs))?;
             let hash = hasher::hash_symbol(&source, &language, &resolved)?;
 
             entries.push(LockEntry {
@@ -92,6 +93,18 @@ pub fn resolve_and_hash_all_references(
     }
 
     Ok(entries)
+}
+
+/// Enrich a `SymbolNotFound` error with the markdown locations that reference the broken symbol.
+fn enrich_with_source_locations(e: error::Error, refs: &[Reference]) -> error::Error {
+    let error::Error::SymbolNotFound { file, symbol, suggestions, .. } = e else {
+        return e;
+    };
+    let sources = refs.iter()
+        .filter(|r| r.symbol.display_name() == symbol)
+        .map(|r| SourceRef { file: r.source.clone(), line: r.source_line })
+        .collect();
+    error::Error::SymbolNotFound { file, symbol, suggestions, referenced_from: sources }
 }
 
 /// Parse a symbol string into bare or dot-scoped form.

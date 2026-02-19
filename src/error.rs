@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::types::SourceRef;
+
 /// All errors in docref carry enough context to produce a useful diagnostic
 /// without a debugger. Each variant names the file, symbol, or reason for failure.
 #[derive(Debug, thiserror::Error)]
@@ -9,6 +11,7 @@ pub enum Error {
         file: PathBuf,
         symbol: String,
         suggestions: Vec<String>,
+        referenced_from: Vec<SourceRef>,
     },
 
     #[error(
