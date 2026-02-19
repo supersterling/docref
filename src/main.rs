@@ -83,6 +83,9 @@ Examples:
 
 /// After-help text for the `init` subcommand.
 const INIT_HELP: &str = "\
+Without .docref.toml, ALL markdown files from the project root are scanned
+(including node_modules, vendor, etc). Create a config with include patterns first.
+
 Examples:
   docref init                       # Scan and generate lockfile
   docref init && docref check       # Init then verify";

@@ -140,15 +140,186 @@ fn print_json(state: &CurrentState) {
 /// Print the full markdown reference document to stdout.
 fn print_markdown(state: &CurrentState) {
     let version = env!("CARGO_PKG_VERSION");
-    print_markdown_header(version);
-    print_markdown_state(state);
+    print_section_title(version);
+    print_section_how_it_works();
+    print_section_reference_syntax();
+    print_section_path_resolution();
+    print_section_setup();
+    print_section_commands();
+    print_section_configuration();
+    print_section_languages();
+    print_section_state(state);
     println!();
-    print_markdown_exit_codes();
+    print_section_exit_codes();
+    return;
+}
+
+/// Print title and one-line description.
+fn print_section_title(version: &str) {
+    print!(
+        "\
+# docref {version}
+
+Semantic code references for markdown — track code symbols in your docs
+and detect when code changes make them stale.
+
+"
+    );
+    return;
+}
+
+/// Print the core mental model for how docref works.
+fn print_section_how_it_works() {
+    print!(
+        "\
+## How It Works
+
+Markdown files in your project are the documents docref tracks. Any standard
+markdown link pointing to a source file becomes a tracked reference:
+
+    [descriptive text](path/to/file.rs#symbol_name)
+
+docref hashes each referenced symbol's source code. When code changes,
+`docref check` detects which references became stale or broken.
+
+"
+    );
+    return;
+}
+
+/// Print reference syntax with all supported forms.
+fn print_section_reference_syntax() {
+    print!(
+        "\
+## Reference Syntax
+
+    [text](path/to/file.rs#symbol)           symbol reference
+    [text](path/to/file.rs#Type.method)       dot-scoped sub-symbol
+    [text](ns:path/to/file.rs#symbol)         namespaced reference
+    [text](path/to/file.rs)                   whole-file reference (no #symbol)
+
+Use `docref resolve <file>` to list all addressable symbols in a source file.
+
+"
+    );
+    return;
+}
+
+/// Print path resolution rules — the #1 footgun for new users.
+fn print_section_path_resolution() {
+    print!(
+        "\
+## Path Resolution
+
+IMPORTANT: Paths are relative to the markdown file, not the project root.
+
+    # In docs/guide.md, referencing src/config.rs:
+    [load](../src/config.rs#load)          CORRECT (relative from docs/)
+    [load](src/config.rs#load)             WRONG (resolves to docs/src/config.rs)
+
+For cross-directory references, use namespaces instead of deep relative paths:
+
+    # Fragile — breaks if markdown file moves:
+    [load](../../services/auth/src/config.rs#load)
+
+    # Robust — works from any markdown file:
+    [load](auth:src/config.rs#load)
+
+Set up namespaces: `docref namespace add <name> <path>`
+
+"
+    );
+    return;
+}
+
+/// Print the recommended setup flow.
+fn print_section_setup() {
+    print!(
+        "\
+## Quick Start
+
+    1. Create .docref.toml with include patterns (see Configuration)
+    2. Write [text](file#symbol) references in your markdown
+    3. docref init       Scan markdown, hash symbols, write .docref.lock
+    4. docref check      Verify all references (CI gate)
+
+IMPORTANT: Without .docref.toml, docref scans ALL markdown files from the
+project root — including node_modules, vendor, .next, etc. Always create
+a config with include patterns before running `docref init`.
+
+"
+    );
+    return;
+}
+
+/// Print all available commands.
+fn print_section_commands() {
+    print!(
+        "\
+## Commands
+
+    docref init                          Scan markdown, hash symbols, write .docref.lock
+    docref check                         Verify all references (exit 0/1/2)
+    docref status                        Show freshness of all tracked references
+    docref update <file#symbol>          Re-hash after intentional code changes
+    docref update --from <file.md>       Re-hash all refs from a markdown file
+    docref update --all                  Re-hash everything
+    docref fix                           Auto-fix all broken refs (closest match)
+    docref fix <file#sym> <newsym>       Fix a specific broken reference
+    docref resolve <file>                List addressable symbols in a source file
+    docref namespace add <name> <path>   Map a short name to a directory
+    docref namespace list                Show all namespace mappings
+    docref namespace remove <name>       Remove a namespace mapping
+    docref namespace rename <old> <new>  Rename (rewrites config + markdown)
+    docref info                          Show this reference document
+    docref info --json                   Machine-readable output
+
+"
+    );
+    return;
+}
+
+/// Print configuration file format and behavior.
+fn print_section_configuration() {
+    print!(
+        "\
+## Configuration (.docref.toml)
+
+    include = [\"docs/\", \"src/\"]         # only scan these paths for markdown
+    exclude = [\"docs/archive/\"]          # skip these within included paths
+    extends = \"../.docref.toml\"          # inherit parent config
+
+    [namespaces]
+    auth = \"services/auth\"               # auth:src/lib.rs -> services/auth/src/lib.rs
+
+Include/exclude patterns are path prefixes, not globs. Without .docref.toml,
+ALL markdown under the project root is scanned. Create a config to avoid
+errors from third-party markdown in node_modules, vendor, etc.
+
+"
+    );
+    return;
+}
+
+/// Print supported language table.
+fn print_section_languages() {
+    print!(
+        "\
+## Supported Languages
+
+| Extension | Language   |
+|-----------|------------|
+| .rs       | Rust       |
+| .ts .tsx  | TypeScript |
+| .md       | Markdown   |
+
+"
+    );
     return;
 }
 
 /// Print the exit codes table section.
-fn print_markdown_exit_codes() {
+fn print_section_exit_codes() {
     print!(
         "\
 ## Exit Codes
@@ -164,73 +335,11 @@ fn print_markdown_exit_codes() {
     return;
 }
 
-/// Print the header with syntax, workflow, and configuration sections.
-fn print_markdown_header(version: &str) {
-    print_markdown_header_intro(version);
-    print_markdown_header_reference();
-    return;
-}
-
-/// Print the title and reference syntax sections.
-fn print_markdown_header_intro(version: &str) {
-    print!(
-        "\
-# docref {version}
-
-Semantic code references for markdown — track code symbols referenced in docs
-and detect when code changes make references stale.
-
-## Reference Syntax
-
-    [link text](path/to/file.rs#symbol)            local reference
-    [link text](path/to/file.rs#Type.method)        dot-scoped symbol
-    [link text](namespace:path/to/file.rs#symbol)   namespaced reference
-
-## Workflow
-
-    docref init                       Scan markdown, hash symbols, write .docref.lock
-    docref check                      Verify all references (exit 0/1/2)
-    docref update <file#symbol>       Re-hash after intentional code changes
-    docref update --from <file.md>    Re-hash all refs from a markdown file
-    docref update --all               Re-hash everything
-    docref status                     Show freshness of all references
-    docref resolve <file>             List addressable symbols in a file
-
-"
-    );
-    return;
-}
-
-/// Print the languages, configuration, and current state heading.
-fn print_markdown_header_reference() {
-    print!(
-        "\
-## Supported Languages
-
-| Extension | Language   |
-|-----------|------------|
-| .rs       | Rust       |
-| .ts .tsx  | TypeScript |
-| .md       | Markdown   |
-
-## Configuration (.docref.toml)
-
-    include = [\"docs/\"]                 # only scan these paths
-    exclude = [\"docs/archive/\"]         # skip these paths
-    extends = \"../.docref.toml\"         # inherit parent config
-
-    [namespaces]
-    auth = \"services/auth\"              # auth:src/lib.rs -> services/auth/src/lib.rs
-
-## Current State
-
-"
-    );
-    return;
-}
-
 /// Print the current project state (config, lockfile, namespaces).
-fn print_markdown_state(state: &CurrentState) {
+fn print_section_state(state: &CurrentState) {
+    println!("## Current State");
+    println!();
+
     if state.config_found {
         println!("Config:     .docref.toml (found)");
     } else {
