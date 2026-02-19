@@ -31,6 +31,23 @@ fn collect_semantic_leaf_tokens<'a>(node: Node<'a>, source: &'a str, tokens: &mu
     }
 }
 
+/// Compute a semantic hash for an entire file's content.
+///
+/// Constructs a `ResolvedSymbol` spanning the full source and delegates
+/// to `hash_symbol` for consistent normalization.
+///
+/// # Errors
+///
+/// Returns `Error::ParseFailed` if tree-sitter cannot parse the file.
+pub fn hash_file(source: &str, language: &Language) -> Result<SemanticHash, Error> {
+    let len = u32::try_from(source.len()).map_err(|_err| return Error::ParseFailed {
+        file: PathBuf::from("<whole-file>"),
+        reason: "file length exceeds u32 range".to_string(),
+    })?;
+    let whole = ResolvedSymbol { byte_range: 0..len };
+    return hash_symbol(source, language, &whole);
+}
+
 /// Compute a semantic hash for a resolved symbol.
 ///
 /// Normalization: extract the symbol's subtree, walk leaf nodes,

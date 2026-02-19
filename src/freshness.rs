@@ -43,16 +43,20 @@ pub fn compare_lockfile_entry_against_source(
         return Ok(CheckResult::Broken("unsupported language"));
     };
 
-    let query = parse_symbol_query(&entry.symbol);
-    let resolved = match resolver::resolve(&disk_path, &source, &language, &query) {
-        Err(error::Error::SymbolNotFound { .. }) => {
-            return Ok(CheckResult::Broken("symbol removed"));
-        },
-        Err(e) => return Err(e),
-        Ok(r) => r,
+    let new_hash = if entry.symbol.is_empty() {
+        hasher::hash_file(&source, &language)?
+    } else {
+        let query = parse_symbol_query(&entry.symbol);
+        let resolved = match resolver::resolve(&disk_path, &source, &language, &query) {
+            Err(error::Error::SymbolNotFound { .. }) => {
+                return Ok(CheckResult::Broken("symbol removed"));
+            },
+            Err(e) => return Err(e),
+            Ok(r) => r,
+        };
+        hasher::hash_symbol(&source, &language, &resolved)?
     };
 
-    let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
     if new_hash == entry.hash {
         return Ok(CheckResult::Fresh);
     } else {
@@ -78,8 +82,29 @@ fn enrich_with_source_locations(e: error::Error, refs: &[Reference]) -> error::E
     return error::Error::SymbolNotFound { file, referenced_from: sources, suggestions, symbol };
 }
 
-/// Parse a symbol string into bare or dot-scoped form.
+/// Hash a single reference — whole-file or symbol-scoped.
+///
+/// # Errors
+///
+/// Returns resolution or hashing errors.
+fn hash_reference(
+    disk_path: &std::path::Path,
+    source: &str,
+    language: &tree_sitter::Language,
+    reference: &Reference,
+) -> Result<crate::types::SemanticHash, error::Error> {
+    if matches!(reference.symbol, SymbolQuery::WholeFile) {
+        return hasher::hash_file(source, language);
+    }
+    let resolved = resolver::resolve(disk_path, source, language, &reference.symbol)?;
+    return hasher::hash_symbol(source, language, &resolved);
+}
+
+/// Parse a symbol string into bare, dot-scoped, or whole-file form.
 pub fn parse_symbol_query(symbol: &str) -> SymbolQuery {
+    if symbol.is_empty() {
+        return SymbolQuery::WholeFile;
+    }
     return match symbol.split_once('.') {
         None => SymbolQuery::Bare(symbol.to_string()),
         Some((parent, child)) => SymbolQuery::Scoped {
@@ -122,9 +147,8 @@ pub fn resolve_and_hash_all_references(
         let language = grammar::language_for_path(&disk_path)?;
 
         for reference in refs {
-            let resolved = resolver::resolve(&disk_path, &source, &language, &reference.symbol)
+            let hash = hash_reference(&disk_path, &source, &language, reference)
                 .map_err(|e| return enrich_with_source_locations(e, refs))?;
-            let hash = hasher::hash_symbol(&source, &language, &resolved)?;
 
             entries.push(LockEntry {
                 hash,

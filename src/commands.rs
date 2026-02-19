@@ -75,18 +75,14 @@ pub fn check() -> Result<ExitCode, error::Error> {
     let mut broken_count = 0_u32;
 
     for entry in &lockfile.entries {
+        let refstr = format_ref(&entry.target, &entry.symbol);
         match compare_lockfile_entry_against_source(&root, &config, entry)? {
             CheckResult::Broken(reason) => {
                 broken_count = broken_count.saturating_add(1);
-                println!(
-                    "BROKEN  {}#{} ({reason})",
-                    entry.target.display(),
-                    entry.symbol
-                );
+                println!("BROKEN  {refstr} ({reason})");
             },
             CheckResult::Fresh => {},
             CheckResult::Stale => {
-                let refstr = format!("{}#{}", entry.target.display(), entry.symbol);
                 println!("STALE   {refstr}");
                 stale_refs.push(refstr);
             },
@@ -162,6 +158,9 @@ fn collect_fixes_for_target(
     };
 
     for reference in refs {
+        if matches!(reference.symbol, crate::types::SymbolQuery::WholeFile) {
+            continue;
+        }
         match resolver::resolve(&disk_path, &source, &language, &reference.symbol) {
             Err(error::Error::SymbolNotFound { symbol, suggestions, .. }) => {
                 classify_broken_ref(reference, &symbol, &suggestions, fixes, unfixable);
@@ -214,7 +213,12 @@ pub fn fix() -> Result<(), error::Error> {
 /// Returns errors from scanning, resolution, or file I/O.
 pub fn fix_targeted(reference: &str, new_symbol: &str) -> Result<(), error::Error> {
     let root = PathBuf::from(".");
-    let (target_file, old_symbol) = split_reference(reference)?;
+    let (target_file, old_symbol) = split_reference(reference);
+
+    if old_symbol.is_empty() {
+        eprintln!("Whole-file references don't have symbols to fix.");
+        return Ok(());
+    }
 
     let config = config::Config::load(&root)?;
 
@@ -254,6 +258,14 @@ pub fn fix_targeted(reference: &str, new_symbol: &str) -> Result<(), error::Erro
     apply_fixes(&fixes)?;
     print_fix_report(&fixes, &[]);
     return Ok(());
+}
+
+/// Format a reference as `file#symbol` or just `file` for whole-file refs.
+fn format_ref(target: &std::path::Path, symbol: &str) -> String {
+    if symbol.is_empty() {
+        return target.display().to_string();
+    }
+    return format!("{}#{symbol}", target.display());
 }
 
 /// Group entry indices by their target file path.
@@ -360,9 +372,13 @@ fn rehash_entries_for_target(
             });
         };
         let symbol = entry.symbol.clone();
-        let query = parse_symbol_query(&symbol);
-        let resolved = resolver::resolve(disk_path, source, language, &query)?;
-        let new_hash = hasher::hash_symbol(source, language, &resolved)?;
+        let new_hash = if symbol.is_empty() {
+            hasher::hash_file(source, language)?
+        } else {
+            let query = parse_symbol_query(&symbol);
+            let resolved = resolver::resolve(disk_path, source, language, &query)?;
+            hasher::hash_symbol(source, language, &resolved)?
+        };
         let Some(entry_mut) = lockfile.entries.get_mut(idx) else {
             return Err(error::Error::LockfileCorrupt {
                 reason: format!("index {idx} out of bounds"),
@@ -411,19 +427,14 @@ fn rewrite_symbol_on_line(lines: &mut [String], fix: &FixAction) {
     return;
 }
 
-/// Parse a `file#symbol` string into its components.
+/// Parse a `file#symbol` or bare `file` string into its components.
 ///
-/// # Errors
-///
-/// Returns `Error::ParseFailed` if the string doesn't contain `#`.
-fn split_reference(input: &str) -> Result<(PathBuf, String), error::Error> {
-    let Some((file, symbol)) = input.split_once('#') else {
-        return Err(error::Error::ParseFailed {
-            file: PathBuf::from(input),
-            reason: "expected file#symbol format".to_string(),
-        });
+/// Returns an empty symbol string for bare file references.
+fn split_reference(input: &str) -> (PathBuf, String) {
+    return match input.split_once('#') {
+        Some((file, symbol)) => (PathBuf::from(file), symbol.to_string()),
+        None => (PathBuf::from(input), String::new()),
     };
-    return Ok((PathBuf::from(file), symbol.to_string()));
 }
 
 /// Show all tracked references and their current freshness. Always exits 0.
@@ -439,19 +450,16 @@ pub fn status() -> Result<(), error::Error> {
     let lockfile = Lockfile::read(&lock_path)?;
 
     for entry in &lockfile.entries {
+        let refstr = format_ref(&entry.target, &entry.symbol);
         let label = match compare_lockfile_entry_against_source(&root, &config, entry)? {
             CheckResult::Broken(reason) => {
-                println!(
-                    "BROKEN  {}#{} ({reason})",
-                    entry.target.display(),
-                    entry.symbol
-                );
+                println!("BROKEN  {refstr} ({reason})");
                 continue;
             },
             CheckResult::Fresh => "FRESH ",
             CheckResult::Stale => "STALE ",
         };
-        println!("{label}  {}#{}", entry.target.display(), entry.symbol);
+        println!("{label}  {refstr}");
     }
 
     return Ok(());
@@ -467,16 +475,21 @@ pub fn update(reference: &str) -> Result<(), error::Error> {
     let lock_path = root.join(".docref.lock");
 
     let config = config::Config::load(&root)?;
-    let (file, symbol) = split_reference(reference)?;
+    let (file, symbol) = split_reference(reference);
     let mut lockfile = Lockfile::read(&lock_path)?;
 
     let disk_path = config.resolve_target(&file)?;
     let source = std::fs::read_to_string(root.join(&disk_path))
         .map_err(|_err| return error::Error::FileNotFound { path: disk_path.clone() })?;
     let language = grammar::language_for_path(&disk_path)?;
-    let query = parse_symbol_query(&symbol);
-    let resolved = resolver::resolve(&disk_path, &source, &language, &query)?;
-    let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
+
+    let new_hash = if symbol.is_empty() {
+        hasher::hash_file(&source, &language)?
+    } else {
+        let query = parse_symbol_query(&symbol);
+        let resolved = resolver::resolve(&disk_path, &source, &language, &query)?;
+        hasher::hash_symbol(&source, &language, &resolved)?
+    };
 
     let mut updated = false;
     for entry in &mut lockfile.entries {
@@ -496,7 +509,7 @@ pub fn update(reference: &str) -> Result<(), error::Error> {
     }
 
     lockfile.write(&lock_path)?;
-    eprintln!("Updated {}#{symbol}", file.display());
+    eprintln!("Updated {}", format_ref(&file, &symbol));
 
     return Ok(());
 }
@@ -519,9 +532,13 @@ pub fn update_all() -> Result<(), error::Error> {
         let source = std::fs::read_to_string(root.join(&disk_path))
             .map_err(|_err| return error::Error::FileNotFound { path: disk_path.clone() })?;
         let language = grammar::language_for_path(&disk_path)?;
-        let query = parse_symbol_query(&entry.symbol);
-        let resolved = resolver::resolve(&disk_path, &source, &language, &query)?;
-        entry.hash = hasher::hash_symbol(&source, &language, &resolved)?;
+        entry.hash = if entry.symbol.is_empty() {
+            hasher::hash_file(&source, &language)?
+        } else {
+            let query = parse_symbol_query(&entry.symbol);
+            let resolved = resolver::resolve(&disk_path, &source, &language, &query)?;
+            hasher::hash_symbol(&source, &language, &resolved)?
+        };
     }
 
     lockfile.write(&lock_path)?;

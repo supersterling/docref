@@ -43,7 +43,8 @@ pub struct SourceRef {
     pub line: u32,
 }
 
-/// Parsed from a symbol fragment. Either bare ("add") or dot-scoped ("Config.validate").
+/// Parsed from a symbol fragment. Either bare ("add"), dot-scoped ("Config.validate"),
+/// or whole-file (no fragment).
 #[derive(Debug, Clone)]
 pub enum SymbolQuery {
     /// Unscoped symbol name such as `add`.
@@ -55,6 +56,8 @@ pub enum SymbolQuery {
         /// Enclosing type or module name.
         parent: String,
     },
+    /// Entire file reference — no symbol fragment.
+    WholeFile,
 }
 
 impl SymbolQuery {
@@ -66,6 +69,7 @@ impl SymbolQuery {
                 parent,
                 child,
             } => format!("{parent}.{child}"),
+            SymbolQuery::WholeFile => String::new(),
         };
     }
 }

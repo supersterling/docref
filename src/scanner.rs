@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 
 use crate::config::Config;
 use crate::error::Error;
+use crate::grammar;
 use crate::types::{Reference, SymbolQuery};
 
 /// Extract all `[text](path#symbol)` references from markdown content.
@@ -56,20 +57,28 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 /// Try to parse a regex capture into a local code reference.
 ///
-/// Returns `None` for external URLs or empty fragments.
+/// Returns `None` for external URLs, empty targets, or bare links to
+/// files without a tree-sitter grammar.
 fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path, line_number: u32) -> Option<Reference> {
     let raw_target = &cap[2];
-    let raw_symbol = &cap[3];
 
     if raw_target.starts_with("http://")
         || raw_target.starts_with("https://")
         || raw_target.is_empty()
-        || raw_symbol.is_empty()
     {
         return None;
     }
 
-    let symbol = parse_symbol_fragment_as_query(raw_symbol);
+    let symbol = match cap.get(3) {
+        Some(m) if !m.as_str().is_empty() => parse_symbol_fragment_as_query(m.as_str()),
+        _ => {
+            // Bare file link — only track if a grammar exists for the target.
+            if grammar::language_for_path(Path::new(raw_target)).is_err() {
+                return None;
+            }
+            SymbolQuery::WholeFile
+        },
+    };
 
     // Namespaced reference: store as-is (resolved later through Config).
     let is_namespaced = raw_target.contains(':');
@@ -129,7 +138,7 @@ fn push_normalized_component<'a>(
 ///
 /// Returns `Error::Io` if any markdown file cannot be read.
 pub fn scan(root: &Path, config: &Config) -> Result<HashMap<PathBuf, Vec<Reference>>, Error> {
-    let pattern = Regex::new(r"\[([^\]]+)\]\(([^)#]+)#([^)]+)\)")
+    let pattern = Regex::new(r"\[([^\]]+)\]\(([^)#]+)(?:#([^)]+))?\)")
         .map_err(|e| return Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
     let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
 
@@ -158,9 +167,13 @@ pub fn scan(root: &Path, config: &Config) -> Result<HashMap<PathBuf, Vec<Referen
 mod tests {
     use super::*;
 
+    fn test_pattern() -> Regex {
+        return Regex::new(r"\[([^\]]+)\]\(([^)#]+)(?:#([^)]+))?\)").unwrap();
+    }
+
     #[test]
     fn non_namespaced_resolves_relative_to_markdown() {
-        let pattern = Regex::new(r"\[([^\]]+)\]\(([^)#]+)#([^)]+)\)").unwrap();
+        let pattern = test_pattern();
         let source = Path::new("docs/guide.md");
         let line = "See [`add`](../src/lib.rs#add) for details.";
         let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
@@ -174,7 +187,7 @@ mod tests {
 
     #[test]
     fn parses_namespaced_reference() {
-        let pattern = Regex::new(r"\[([^\]]+)\]\(([^)#]+)#([^)]+)\)").unwrap();
+        let pattern = test_pattern();
         let source = Path::new("docs/guide.md");
         let line = "See [`validate`](auth:src/lib.rs#validate) for details.";
         let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
@@ -184,5 +197,31 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, PathBuf::from("auth:src/lib.rs"));
         assert_eq!(refs[0].source_line, 7);
+    }
+
+    #[test]
+    fn whole_file_link_produces_whole_file_query() {
+        let pattern = test_pattern();
+        let source = Path::new("docs/guide.md");
+        let line = "See [core library](../src/lib.rs) for details.";
+        let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
+        extract_references_from_markdown_line(line, 3, source, &pattern, &mut grouped);
+
+        let refs: Vec<&Reference> = grouped.values().flatten().collect();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].target, PathBuf::from("src/lib.rs"));
+        assert!(matches!(refs[0].symbol, SymbolQuery::WholeFile));
+    }
+
+    #[test]
+    fn unsupported_extension_bare_link_is_skipped() {
+        let pattern = test_pattern();
+        let source = Path::new("docs/guide.md");
+        let line = "See [photo](./photo.png) for details.";
+        let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
+        extract_references_from_markdown_line(line, 1, source, &pattern, &mut grouped);
+
+        let refs: Vec<&Reference> = grouped.values().flatten().collect();
+        assert_eq!(refs.len(), 0);
     }
 }

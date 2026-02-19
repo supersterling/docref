@@ -38,10 +38,11 @@ use clap::{Parser, Subcommand};
 /// After-help text displayed for the top-level CLI.
 const AFTER_HELP: &str = "\
 Workflow:
-  1. Write [text](file#symbol) references in markdown
+  1. Write [text](file#symbol) or [text](file) references in markdown
   2. docref init                       # Generate .docref.lock
   3. docref check                      # Verify freshness (CI gate)
   4. docref update <file#symbol>       # Accept intentional changes
+  5. docref update <file>              # Accept whole-file changes
 
 Exit codes (check):  0=fresh  1=stale  2=broken  3=error
 
@@ -56,7 +57,9 @@ Exit codes:
 
 Examples:
   docref check                      # Verify all references
-  docref check && echo 'Fresh'      # CI gate pattern";
+  docref check && echo 'Fresh'      # CI gate pattern
+
+Supports both [text](file#symbol) and [text](file) whole-file references.";
 
 /// After-help text for the `fix` subcommand.
 const FIX_HELP: &str = "\
@@ -100,12 +103,14 @@ Examples:
 /// After-help text for the `update` subcommand.
 const UPDATE_HELP: &str = "\
 Modes:
-  docref update <file#symbol>       # Re-hash one reference
+  docref update <file#symbol>       # Re-hash one symbol reference
+  docref update <file>              # Re-hash a whole-file reference
   docref update --from <file.md>    # Re-hash all refs from a markdown file
   docref update --all               # Re-hash every lockfile entry
 
 Examples:
   docref update src/lib.rs#add
+  docref update src/lib.rs
   docref update --from docs/guide.md
   docref update --all";
 

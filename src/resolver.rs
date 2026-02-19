@@ -632,6 +632,7 @@ pub fn resolve(
         SymbolQuery::Scoped { parent, child } => {
             find_declaration_by_qualified_dotpath(&declarations, parent, child, file_path)
         }
+        SymbolQuery::WholeFile => unreachable!("resolver should not be called for whole-file queries"),
     };
 }
 

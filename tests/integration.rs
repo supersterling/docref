@@ -836,3 +836,115 @@ fn subdecl_field_removal_detected_broken() {
     let stdout = String::from_utf8_lossy(&check.stdout);
     assert_eq!(code, 2, "expected exit 2 (broken), got {code}\nstdout: {stdout}");
 }
+
+// --- Whole-file reference tests ---
+
+#[test]
+fn wholefile_init_then_check_passes() {
+    let (_tmp, dir) = isolated_fixture("wholefile");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let lock = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    // Whole-file entry: symbol is empty string.
+    assert!(
+        lock.contains("symbol = \"\""),
+        "lockfile missing whole-file entry: {lock}"
+    );
+    // Symbol-scoped entry should still be present.
+    assert!(
+        lock.contains("symbol = \"add\""),
+        "lockfile missing add entry: {lock}"
+    );
+    // png link should NOT produce an entry.
+    assert!(
+        !lock.contains("photo.png"),
+        "lockfile should not track png: {lock}"
+    );
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
+fn wholefile_detects_stale_after_file_change() {
+    let (_tmp, dir) = isolated_fixture("wholefile");
+    let src = dir.join("src/lib.rs");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Modify the file content.
+    let original = std::fs::read_to_string(&src).unwrap();
+    let modified = original.replace("x + y", "x * y");
+    std::fs::write(&src, &modified).unwrap();
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(code, 1, "expected stale, got {code}\nstdout: {stdout}");
+    assert!(stdout.contains("STALE"), "expected STALE in: {stdout}");
+}
+
+#[test]
+fn wholefile_update_bare_path() {
+    let (_tmp, dir) = isolated_fixture("wholefile");
+    let src = dir.join("src/lib.rs");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Modify and make stale.
+    let original = std::fs::read_to_string(&src).unwrap();
+    std::fs::write(&src, original.replace("x + y", "x * y")).unwrap();
+
+    // Update with bare path (no #symbol).
+    let update = docref_at(&dir)
+        .args(["update", "src/lib.rs"])
+        .output()
+        .unwrap();
+    assert!(
+        update.status.success(),
+        "update bare path failed: {}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+
+    // The whole-file ref should be fresh now, but add is still stale.
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(code, 1, "expected stale (add still changed), got {code}\nstdout: {stdout}");
+    // Verify the whole-file entry is no longer listed as stale.
+    let stale_lines: Vec<&str> = stdout.lines().filter(|l| l.starts_with("STALE")).collect();
+    assert_eq!(stale_lines.len(), 1, "expected 1 stale ref (add), got: {stale_lines:?}");
+}
+
+#[test]
+fn wholefile_status_display() {
+    let (_tmp, dir) = isolated_fixture("wholefile");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let status = docref_at(&dir).arg("status").output().unwrap();
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    // Whole-file ref should show without # suffix.
+    assert!(
+        stdout.contains("src/lib.rs\n") || stdout.contains("src/lib.rs\r"),
+        "status should show bare file path without #: {stdout}"
+    );
+    // Symbol ref should still show with #.
+    assert!(
+        stdout.contains("src/lib.rs#add"),
+        "status should show symbol ref: {stdout}"
+    );
+}
