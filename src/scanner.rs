@@ -62,10 +62,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 fn parse_markdown_link_capture(cap: &Captures<'_>, source: &Path, line_number: u32) -> Option<Reference> {
     let raw_target = &cap[2];
 
-    if raw_target.starts_with("http://")
-        || raw_target.starts_with("https://")
-        || raw_target.is_empty()
-    {
+    if raw_target.contains("://") || raw_target.is_empty() {
         return None;
     }
 
@@ -211,6 +208,32 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, PathBuf::from("src/lib.rs"));
         assert!(matches!(refs[0].symbol, SymbolQuery::WholeFile));
+    }
+
+    #[test]
+    fn https_url_is_skipped() {
+        let pattern = test_pattern();
+        let source = Path::new("docs/guide.md");
+        let line = "See [docs](https://example.com) for details.";
+        let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
+        extract_references_from_markdown_line(line, 1, source, &pattern, &mut grouped);
+
+        let refs: Vec<&Reference> = grouped.values().flatten().collect();
+        assert_eq!(refs.len(), 0);
+    }
+
+    #[test]
+    fn quoted_url_is_skipped() {
+        let pattern = test_pattern();
+        let source = Path::new("docs/guide.md");
+        // Some markdown contains URLs with surrounding quotes or other characters
+        // that defeat a starts_with("https://") check.
+        let line = r#"See [docs]("https://example.com") for details."#;
+        let mut grouped: HashMap<PathBuf, Vec<Reference>> = HashMap::new();
+        extract_references_from_markdown_line(line, 1, source, &pattern, &mut grouped);
+
+        let refs: Vec<&Reference> = grouped.values().flatten().collect();
+        assert_eq!(refs.len(), 0);
     }
 
     #[test]
