@@ -948,3 +948,405 @@ fn wholefile_status_display() {
         "status should show symbol ref: {stdout}"
     );
 }
+
+// --- JavaScript / JSX tests ---
+
+#[test]
+fn javascript_init_then_check_passes() {
+    let (_tmp, dir) = isolated_fixture("javascript");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let lock = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(lock.contains("app.js"), "lockfile missing JS refs: {lock}");
+    assert!(lock.contains("VERSION"), "lockfile missing VERSION: {lock}");
+    assert!(lock.contains("greet"), "lockfile missing greet: {lock}");
+    assert!(lock.contains("App"), "lockfile missing App: {lock}");
+    assert!(lock.contains("App.render"), "lockfile missing App.render: {lock}");
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
+fn javascript_resolve_lists_symbols() {
+    let (_tmp, dir) = isolated_fixture("javascript");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "src/app.js"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("VERSION"), "missing VERSION: {stdout}");
+    assert!(stdout.contains("greet"), "missing greet: {stdout}");
+    assert!(stdout.contains("App"), "missing App: {stdout}");
+}
+
+// --- JSON format tests ---
+
+#[test]
+fn check_json_output_all_fresh() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let check = docref_at(&dir)
+        .args(["check", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(check.status.success());
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\n{stdout}"));
+    assert_eq!(json["summary"]["broken"], 0);
+    assert_eq!(json["summary"]["stale"], 0);
+    assert!(json["summary"]["fresh"].as_u64().unwrap() > 0);
+    assert!(json["entries"].as_array().unwrap().len() > 0);
+}
+
+#[test]
+fn check_json_output_stale() {
+    let (_tmp, dir) = isolated_fixture("basic");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let modified = original.replace("const A: i32 = 10;", "const A: i32 = 20;");
+    std::fs::write(&src, &modified).unwrap();
+
+    let check = docref_at(&dir)
+        .args(["check", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(check.status.code().unwrap(), 1);
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\n{stdout}"));
+    assert!(json["summary"]["stale"].as_u64().unwrap() > 0);
+    let entries = json["entries"].as_array().unwrap();
+    assert!(entries.iter().any(|e| e["status"] == "stale"));
+}
+
+#[test]
+fn check_json_broken_includes_reason() {
+    let (_tmp, dir) = isolated_fixture("basic");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+    docref_at(&dir).arg("init").output().unwrap();
+
+    let broken = original.replace("const A: i32 = 10;\n", "");
+    std::fs::write(&src, &broken).unwrap();
+
+    let check = docref_at(&dir)
+        .args(["check", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(check.status.code().unwrap(), 2);
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\n{stdout}"));
+    assert!(json["summary"]["broken"].as_u64().unwrap() > 0);
+    let entries = json["entries"].as_array().unwrap();
+    let broken_entry = entries.iter().find(|e| e["status"] == "broken").unwrap();
+    assert!(broken_entry["reason"].as_str().unwrap().len() > 0);
+}
+
+#[test]
+fn status_json_output() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let status = docref_at(&dir)
+        .args(["status", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\n{stdout}"));
+    let entries = json["entries"].as_array().unwrap();
+    assert!(entries.len() > 0);
+    // Status entries should have a hash field.
+    let first = &entries[0];
+    assert!(first["hash"].as_str().unwrap().len() > 0);
+    assert!(first["status"].as_str().is_some());
+}
+
+// --- Refs (reverse lookup) tests ---
+
+#[test]
+fn refs_shows_all_docs_for_file() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir)
+        .args(["refs", "src/lib.rs"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("docs/guide.md"), "missing guide.md source: {stdout}");
+}
+
+#[test]
+fn refs_filters_by_symbol() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir)
+        .args(["refs", "src/lib.rs#add"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("add"), "should show add ref: {stdout}");
+    // Should NOT show the A reference.
+    assert!(!stdout.contains("#A\n"), "should not show A when filtering by add: {stdout}");
+}
+
+#[test]
+fn refs_works_with_namespaced_targets() {
+    let (_tmp, dir) = isolated_fixture("namespaced");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir)
+        .args(["refs", "auth:src/lib.rs"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("docs/guide.md"), "missing guide.md: {stdout}");
+}
+
+#[test]
+fn refs_no_matches_shows_message() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let output = docref_at(&dir)
+        .args(["refs", "nonexistent.rs"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("No references"), "should show no matches message: {stderr}");
+}
+
+// --- Python support tests ---
+
+#[test]
+fn python_init_then_check_passes() {
+    let (_tmp, dir) = isolated_fixture("python");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let lock = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(lock.contains("app.py"), "lockfile missing Python refs: {lock}");
+    assert!(lock.contains("MAX_RETRIES"), "lockfile missing MAX_RETRIES: {lock}");
+    assert!(lock.contains("process"), "lockfile missing process: {lock}");
+    assert!(lock.contains("Config"), "lockfile missing Config: {lock}");
+    assert!(lock.contains("Config.host"), "lockfile missing Config.host: {lock}");
+    assert!(lock.contains("Config.validate"), "lockfile missing Config.validate: {lock}");
+    assert!(lock.contains("Config.address"), "lockfile missing Config.address: {lock}");
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
+fn python_resolve_lists_symbols() {
+    let (_tmp, dir) = isolated_fixture("python");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "src/app.py"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MAX_RETRIES"), "missing MAX_RETRIES: {stdout}");
+    assert!(stdout.contains("process"), "missing process: {stdout}");
+    assert!(stdout.contains("Config.host"), "missing Config.host: {stdout}");
+    assert!(stdout.contains("Config.validate"), "missing Config.validate: {stdout}");
+}
+
+#[test]
+fn python_detects_stale_on_method_change() {
+    let (_tmp, dir) = isolated_fixture("python");
+    let src = dir.join("src/app.py");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let modified = original.replace("return len(self.host) > 0", "return bool(self.host)");
+    std::fs::write(&src, &modified).unwrap();
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(code, 1, "expected stale, got {code}\nstdout: {stdout}");
+}
+
+// --- Go support tests ---
+
+#[test]
+fn go_init_then_check_passes() {
+    let (_tmp, dir) = isolated_fixture("golang");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let lock = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(lock.contains("main.go"), "lockfile missing Go refs: {lock}");
+    assert!(lock.contains("MaxRetries"), "lockfile missing MaxRetries: {lock}");
+    assert!(lock.contains("globalState"), "lockfile missing globalState: {lock}");
+    assert!(lock.contains("process"), "lockfile missing process: {lock}");
+    assert!(lock.contains("Config"), "lockfile missing Config: {lock}");
+    assert!(lock.contains("Config.Host"), "lockfile missing Config.Host: {lock}");
+    assert!(lock.contains("Config.Validate"), "lockfile missing Config.Validate: {lock}");
+    assert!(lock.contains("Handler"), "lockfile missing Handler: {lock}");
+    assert!(lock.contains("Handler.Handle"), "lockfile missing Handler.Handle: {lock}");
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
+fn go_resolve_lists_symbols() {
+    let (_tmp, dir) = isolated_fixture("golang");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "src/main.go"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MaxRetries"), "missing MaxRetries: {stdout}");
+    assert!(stdout.contains("Config.Host"), "missing Config.Host: {stdout}");
+    assert!(stdout.contains("Config.Validate"), "missing Config.Validate: {stdout}");
+    assert!(stdout.contains("Handler.Handle"), "missing Handler.Handle: {stdout}");
+}
+
+#[test]
+fn go_detects_stale_on_function_change() {
+    let (_tmp, dir) = isolated_fixture("golang");
+    let src = dir.join("src/main.go");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let modified = original.replace("return data", "return data + data");
+    std::fs::write(&src, &modified).unwrap();
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(code, 1, "expected stale, got {code}\nstdout: {stdout}");
+}
+
+// --- Watch tests ---
+
+#[test]
+fn watch_runs_initial_check() {
+    let (_tmp, dir) = isolated_fixture("basic");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Spawn watch, wait briefly, then kill.
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_docref"))
+        .arg("watch")
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("initial check"),
+        "should print initial check message: {stderr}"
+    );
+}
+
+#[test]
+fn watch_detects_change() {
+    let (_tmp, dir) = isolated_fixture("basic");
+    let src = dir.join("src/lib.rs");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Spawn watch.
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_docref"))
+        .arg("watch")
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    // Wait for watcher to start, then modify source.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let original = std::fs::read_to_string(&src).unwrap();
+    std::fs::write(&src, original.replace("const A: i32 = 10;", "const A: i32 = 20;")).unwrap();
+
+    // Wait for re-check to trigger.
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should detect the change and re-check.
+    assert!(
+        stderr.contains("change detected") || stdout.contains("STALE"),
+        "should detect change: stderr={stderr}\nstdout={stdout}"
+    );
+}

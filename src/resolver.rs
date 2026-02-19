@@ -67,9 +67,11 @@ fn collect_class_members(node: Node<'_>, source: &str, declarations: &mut Vec<De
 /// Dispatch to the correct collector based on file extension.
 fn collect_declarations(root: Node<'_>, source: &str, ext: &str) -> Vec<Declaration> {
     return match ext {
-        "rs" => collect_rust_declarations(root, source),
-        "ts" | "tsx" => collect_ts_declarations(root, source),
+        "go" => collect_go_declarations(root, source),
+        "js" | "jsx" | "ts" | "tsx" => collect_ts_declarations(root, source),
         "md" | "markdown" => collect_md_declarations(root, source),
+        "py" => collect_py_declarations(root, source),
+        "rs" => collect_rust_declarations(root, source),
         _ => Vec::new(),
     };
 }
@@ -132,6 +134,174 @@ fn collect_enum_variants(node: Node<'_>, source: &str, declarations: &mut Vec<De
             name: variant_name.to_string(),
             qualified_name: format!("{enum_name}.{variant_name}"),
         });
+    }
+}
+
+/// Collect const declarations from a Go `const_declaration` node.
+fn collect_go_const_specs(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "const_spec" {
+            continue;
+        }
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(name) = name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: name.to_string(),
+            qualified_name: name.to_string(),
+        });
+    }
+}
+
+/// Walk the tree and collect all named Go declarations.
+fn collect_go_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
+    let mut declarations = Vec::new();
+    let mut cursor = root.walk();
+
+    for node in root.children(&mut cursor) {
+        match node.kind() {
+            "const_declaration" => collect_go_const_specs(node, source, &mut declarations),
+            "function_declaration" => declarations.extend(go_function_declaration(node, source)),
+            "method_declaration" => declarations.extend(go_method_declaration(node, source)),
+            "type_declaration" => collect_go_type_specs(node, source, &mut declarations),
+            "var_declaration" => collect_go_var_specs(node, source, &mut declarations),
+            _ => {},
+        }
+    }
+
+    return declarations;
+}
+
+/// Collect method signatures from a Go interface type, qualified as "Interface.Method".
+fn collect_go_interface_methods(
+    type_name: &str,
+    type_node: Node<'_>,
+    source: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let mut cursor = type_node.walk();
+    for child in type_node.children(&mut cursor) {
+        if child.kind() != "method_elem" {
+            continue;
+        }
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(method_name) = name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: method_name.to_string(),
+            qualified_name: format!("{type_name}.{method_name}"),
+        });
+    }
+}
+
+/// Collect fields from a Go struct type, qualified as "Struct.Field".
+fn collect_go_struct_fields(
+    type_name: &str,
+    type_node: Node<'_>,
+    source: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let Some(field_list) = first_child_of_kind(type_node, "field_declaration_list") else {
+        return;
+    };
+    let mut cursor = field_list.walk();
+    for child in field_list.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(field_name) = name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: field_name.to_string(),
+            qualified_name: format!("{type_name}.{field_name}"),
+        });
+    }
+}
+
+/// Collect type specs from a Go `type_declaration`, extracting sub-declarations
+/// for struct fields and interface methods.
+fn collect_go_type_specs(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "type_spec" {
+            continue;
+        }
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(type_name) = name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: type_name.to_string(),
+            qualified_name: type_name.to_string(),
+        });
+
+        // Check for struct or interface body.
+        let Some(type_body) = child.child_by_field_name("type") else {
+            continue;
+        };
+        match type_body.kind() {
+            "interface_type" => {
+                collect_go_interface_methods(type_name, type_body, source, declarations);
+            },
+            "struct_type" => {
+                collect_go_struct_fields(type_name, type_body, source, declarations);
+            },
+            _ => {},
+        }
+    }
+}
+
+/// Collect var declarations from a Go `var_declaration` node.
+fn collect_go_var_specs(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "var_spec" {
+            continue;
+        }
+        if let Some(decl) = go_var_spec_declaration(child, source) {
+            declarations.push(decl);
+        }
     }
 }
 
@@ -209,6 +379,118 @@ fn collect_md_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
     let mut declarations = Vec::new();
     walk_markdown_sections_with_scope(root, source, "", &mut declarations);
     return declarations;
+}
+
+/// Collect methods from a Python class body, qualified as "Class.method".
+fn collect_py_class_members(
+    node: Node<'_>,
+    source: &str,
+    class_name: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        let inner = py_unwrap_decorated(child);
+
+        if inner.kind() != "function_definition" {
+            continue;
+        }
+        let Some(name_node) = inner.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(method_name) = name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        if method_name == "__init__" {
+            collect_py_init_attributes(inner, source, class_name, declarations);
+            continue;
+        }
+        declarations.extend(py_method_declaration(inner, source, class_name, child));
+    }
+}
+
+/// Walk the tree and collect all named Python declarations.
+fn collect_py_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
+    let mut declarations = Vec::new();
+    let mut cursor = root.walk();
+
+    for node in root.children(&mut cursor) {
+        collect_py_top_level_node(node, source, &mut declarations);
+    }
+
+    return declarations;
+}
+
+/// Extract `self.attr` assignments from a Python `__init__` method body.
+fn collect_py_init_attributes(
+    func: Node<'_>,
+    source: &str,
+    class_name: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let Some(body) = func.child_by_field_name("body") else {
+        return;
+    };
+    let mut seen = std::collections::HashSet::new();
+    collect_py_self_attributes_recursive(body, source, class_name, declarations, &mut seen);
+}
+
+/// Recursively walk a function body to find `self.attr = ...` assignments.
+///
+/// Handles `self.attr` inside if/for/try/with blocks. Deduplicates by qualified name
+/// since conditional branches may assign the same attribute.
+fn collect_py_self_attributes_recursive(
+    node: Node<'_>,
+    source: &str,
+    class_name: &str,
+    declarations: &mut Vec<Declaration>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "expression_statement"
+            && let Some(decl) = py_self_attribute_assignment(child, source, class_name)
+            && seen.insert(decl.qualified_name.clone())
+        {
+            declarations.push(decl);
+            continue;
+        }
+        if matches!(
+            child.kind(),
+            "if_statement" | "for_statement" | "while_statement" | "try_statement"
+                | "with_statement" | "block" | "else_clause" | "elif_clause" | "except_clause"
+                | "finally_clause"
+        ) {
+            collect_py_self_attributes_recursive(child, source, class_name, declarations, seen);
+        }
+    }
+}
+
+/// Process a single top-level Python node, collecting its declaration and any class members.
+fn collect_py_top_level_node(
+    node: Node<'_>,
+    source: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let inner = py_unwrap_decorated(node);
+
+    if let Some(decl) = py_named_declaration(inner, source, node) {
+        if inner.kind() == "class_definition" {
+            collect_py_class_members(inner, source, &decl.name, declarations);
+        }
+        declarations.push(decl);
+        return;
+    }
+
+    if inner.kind() == "expression_statement"
+        && let Some(decl) = py_module_variable(inner, source)
+    {
+        declarations.push(decl);
+    }
 }
 
 /// Walk the tree and collect all named Rust declarations.
@@ -505,6 +787,78 @@ fn first_child_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     return node.children(&mut cursor).find(|c| return c.kind() == kind);
 }
 
+/// Extract a top-level function declaration from Go.
+fn go_function_declaration(node: Node<'_>, source: &str) -> Option<Declaration> {
+    let name_node = node.child_by_field_name("name")?;
+    let name = name_node.utf8_text(source.as_bytes()).ok()?.to_string();
+    let start = u32::try_from(node.start_byte()).ok()?;
+    let end = u32::try_from(node.end_byte()).ok()?;
+
+    return Some(Declaration {
+        byte_range: start..end,
+        name: name.clone(),
+        qualified_name: name,
+    });
+}
+
+/// Extract a method declaration from Go, qualified as "Type.Method".
+///
+/// Handles pointer receivers: `func (c *Config) Validate()` → `Config.Validate`.
+fn go_method_declaration(node: Node<'_>, source: &str) -> Option<Declaration> {
+    let receiver = node.child_by_field_name("receiver")?;
+    let type_name = go_receiver_type_name(receiver, source)?;
+
+    let name_node = node.child_by_field_name("name")?;
+    let method_name = name_node.utf8_text(source.as_bytes()).ok()?;
+    let start = u32::try_from(node.start_byte()).ok()?;
+    let end = u32::try_from(node.end_byte()).ok()?;
+
+    return Some(Declaration {
+        byte_range: start..end,
+        name: method_name.to_string(),
+        qualified_name: format!("{type_name}.{method_name}"),
+    });
+}
+
+/// Extract the receiver type name, unwrapping pointer types.
+///
+/// `(c *Config)` → `Config`, `(c Config)` → `Config`.
+fn go_receiver_type_name(receiver: Node<'_>, source: &str) -> Option<String> {
+    // receiver is a parameter_list containing parameter_declaration(s).
+    let mut cursor = receiver.walk();
+    for child in receiver.children(&mut cursor) {
+        if child.kind() != "parameter_declaration" {
+            continue;
+        }
+        let type_node = child.child_by_field_name("type")?;
+        // Unwrap pointer_type if present.
+        let base = if type_node.kind() == "pointer_type" {
+            let mut inner_cursor = type_node.walk();
+            type_node
+                .children(&mut inner_cursor)
+                .find(|c| return c.kind() == "type_identifier")?
+        } else {
+            type_node
+        };
+        return base.utf8_text(source.as_bytes()).ok().map(String::from);
+    }
+    return None;
+}
+
+/// Extract a single var spec as a declaration.
+fn go_var_spec_declaration(node: Node<'_>, source: &str) -> Option<Declaration> {
+    let name_node = node.child_by_field_name("name")?;
+    let name = name_node.utf8_text(source.as_bytes()).ok()?.to_string();
+    let start = u32::try_from(node.start_byte()).ok()?;
+    let end = u32::try_from(node.end_byte()).ok()?;
+
+    return Some(Declaration {
+        byte_range: start..end,
+        name: name.clone(),
+        qualified_name: name,
+    });
+}
+
 /// Check whether a heading is an h1 (document title) by looking for `atx_h1_marker`.
 fn heading_has_h1_marker(heading: Node<'_>) -> bool {
     let mut cursor = heading.walk();
@@ -595,6 +949,127 @@ fn parse_source(file_path: &Path, source: &str, language: &Language) -> Result<T
                 reason: "tree-sitter returned None".to_string(),
             };
         });
+}
+
+/// Extract a method declaration from a Python class body.
+///
+/// `outer` is the possibly-decorated node whose byte range covers decorators.
+fn py_method_declaration(
+    func: Node<'_>,
+    source: &str,
+    class_name: &str,
+    outer: Node<'_>,
+) -> Option<Declaration> {
+    let name_node = func.child_by_field_name("name")?;
+    let method_name = name_node.utf8_text(source.as_bytes()).ok()?;
+
+    // Skip dunder methods — __init__ is handled separately for self.attr extraction.
+    if method_name.starts_with("__") && method_name.ends_with("__") {
+        return None;
+    }
+
+    let start = u32::try_from(outer.start_byte()).ok()?;
+    let end = u32::try_from(outer.end_byte()).ok()?;
+
+    return Some(Declaration {
+        byte_range: start..end,
+        name: method_name.to_string(),
+        qualified_name: format!("{class_name}.{method_name}"),
+    });
+}
+
+/// Extract a top-level module variable from `NAME = ...` assignment.
+fn py_module_variable(node: Node<'_>, source: &str) -> Option<Declaration> {
+    // expression_statement -> assignment
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "assignment" {
+            continue;
+        }
+        let left = child.child_by_field_name("left")?;
+        if left.kind() != "identifier" {
+            return None;
+        }
+        let name = left.utf8_text(source.as_bytes()).ok()?.to_string();
+        // Skip private variables (leading underscore).
+        if name.starts_with('_') {
+            return None;
+        }
+        let start = u32::try_from(node.start_byte()).ok()?;
+        let end = u32::try_from(node.end_byte()).ok()?;
+
+        return Some(Declaration {
+            byte_range: start..end,
+            name: name.clone(),
+            qualified_name: name,
+        });
+    }
+    return None;
+}
+
+/// Extract a top-level function or class declaration from Python.
+///
+/// `outer` is the node to use for byte range (may be `decorated_definition`).
+fn py_named_declaration(node: Node<'_>, source: &str, outer: Node<'_>) -> Option<Declaration> {
+    match node.kind() {
+        "class_definition" | "function_definition" => {},
+        _ => return None,
+    }
+
+    let name_node = node.child_by_field_name("name")?;
+    let name = name_node.utf8_text(source.as_bytes()).ok()?.to_string();
+    let start = u32::try_from(outer.start_byte()).ok()?;
+    let end = u32::try_from(outer.end_byte()).ok()?;
+
+    return Some(Declaration {
+        byte_range: start..end,
+        name: name.clone(),
+        qualified_name: name,
+    });
+}
+
+/// Extract a `self.attr = ...` assignment as a `Class.attr` declaration.
+fn py_self_attribute_assignment(
+    node: Node<'_>,
+    source: &str,
+    class_name: &str,
+) -> Option<Declaration> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "assignment" {
+            continue;
+        }
+        let left = child.child_by_field_name("left")?;
+        if left.kind() != "attribute" {
+            return None;
+        }
+        let object = left.child_by_field_name("object")?;
+        if object.utf8_text(source.as_bytes()).ok()? != "self" {
+            return None;
+        }
+        let attr = left.child_by_field_name("attribute")?;
+        let attr_name = attr.utf8_text(source.as_bytes()).ok()?;
+        let start = u32::try_from(node.start_byte()).ok()?;
+        let end = u32::try_from(node.end_byte()).ok()?;
+
+        return Some(Declaration {
+            byte_range: start..end,
+            name: attr_name.to_string(),
+            qualified_name: format!("{class_name}.{attr_name}"),
+        });
+    }
+    return None;
+}
+
+/// Unwrap a `decorated_definition` to its inner definition node.
+/// Returns the node itself if it's not a decorated definition.
+fn py_unwrap_decorated(node: Node<'_>) -> Node<'_> {
+    if node.kind() != "decorated_definition" {
+        return node;
+    }
+    return node
+        .child_by_field_name("definition")
+        .unwrap_or(node);
 }
 
 /// Parse a source file and resolve one symbol query against it.

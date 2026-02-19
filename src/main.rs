@@ -28,6 +28,8 @@ mod resolver;
 mod scanner;
 /// Core domain types for references and symbols.
 mod types;
+/// File watching and live re-check.
+mod watch;
 
 use std::process::ExitCode;
 
@@ -134,7 +136,11 @@ struct Cli {
 enum Commands {
     /// Verify all references are still fresh
     #[command(after_help = CHECK_HELP)]
-    Check,
+    Check {
+        /// Output format: text or json
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
     /// Auto-fix broken references when a close match exists
     #[command(after_help = FIX_HELP)]
     Fix {
@@ -159,6 +165,11 @@ enum Commands {
         #[command(subcommand)]
         action: NamespaceAction,
     },
+    /// Show which markdown files reference a target file or symbol
+    Refs {
+        /// Target in file or file#symbol format
+        target: String,
+    },
     /// List addressable symbols in a file, or resolve a specific symbol
     #[command(after_help = RESOLVE_HELP)]
     Resolve {
@@ -169,7 +180,11 @@ enum Commands {
     },
     /// Show all tracked references and their current freshness
     #[command(after_help = STATUS_HELP)]
-    Status,
+    Status {
+        /// Output format: text or json
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
     /// Re-hash a stale reference so check passes again
     #[command(after_help = UPDATE_HELP)]
     Update {
@@ -182,6 +197,12 @@ enum Commands {
         /// Reference in file#symbol format (e.g., src/lib.rs#add)
         #[arg(conflicts_with_all = ["from", "all"])]
         reference: Option<String>,
+    },
+    /// Watch source files and re-check on changes
+    Watch {
+        /// Output format: text or json
+        #[arg(long, default_value = "text")]
+        format: String,
     },
 }
 
@@ -283,7 +304,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Check => commands::check(),
+        Commands::Check { format } => commands::check(&format),
         Commands::Fix { reference, symbol } => dispatch_fix(reference, symbol),
         Commands::Info { json } => {
             commands::info(json);
@@ -291,11 +312,13 @@ fn main() -> ExitCode {
         },
         Commands::Init => commands::init().map(|()| return ExitCode::SUCCESS),
         Commands::Namespace { action } => dispatch_namespace(action),
+        Commands::Refs { target } => commands::refs(&target).map(|()| return ExitCode::SUCCESS),
         Commands::Resolve { file, symbol } => {
             commands::resolve(&file, symbol.as_deref()).map(|()| return ExitCode::SUCCESS)
         },
-        Commands::Status => commands::status().map(|()| return ExitCode::SUCCESS),
+        Commands::Status { format } => commands::status(&format).map(|()| return ExitCode::SUCCESS),
         Commands::Update { reference, from, all } => dispatch_update(reference, from, all),
+        Commands::Watch { format } => watch::run(&format),
     };
 
     return match result {

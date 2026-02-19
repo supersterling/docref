@@ -1,8 +1,10 @@
-//! Core CLI commands for docref: init, check, status, resolve, update, fix.
+//! Core CLI commands for docref: init, check, status, resolve, update, fix, refs.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
+
+use serde::Serialize;
 
 use crate::config;
 use crate::diagnostics;
@@ -18,6 +20,42 @@ use crate::resolver;
 use crate::scanner;
 use crate::types::Reference;
 
+/// JSON output for a single check entry.
+#[derive(Serialize)]
+struct CheckEntryJson {
+    /// Optional reason for broken status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    /// The markdown file containing the reference.
+    source: PathBuf,
+    /// Freshness status: "fresh", "stale", or "broken".
+    status: String,
+    /// The symbol name (empty for whole-file refs).
+    symbol: String,
+    /// The target source file.
+    target: PathBuf,
+}
+
+/// JSON output for the check command.
+#[derive(Serialize)]
+struct CheckJson {
+    /// All tracked entries with their statuses.
+    entries: Vec<CheckEntryJson>,
+    /// Summary counts.
+    summary: CheckSummaryJson,
+}
+
+/// Summary counts for the check command JSON output.
+#[derive(Serialize)]
+struct CheckSummaryJson {
+    /// Number of broken references.
+    broken: u32,
+    /// Number of fresh references.
+    fresh: u32,
+    /// Number of stale references.
+    stale: u32,
+}
+
 /// A pending rewrite: replace a symbol fragment in a markdown file.
 struct FixAction {
     /// The markdown file to rewrite.
@@ -28,6 +66,39 @@ struct FixAction {
     new_symbol: String,
     /// The original broken symbol name.
     old_symbol: String,
+}
+
+/// Output format for commands that support structured output.
+enum OutputFormat {
+    /// JSON output for machine consumption.
+    Json,
+    /// Human-readable text (default).
+    Text,
+}
+
+/// JSON output for a single status entry.
+#[derive(Serialize)]
+struct StatusEntryJson {
+    /// The stored hash.
+    hash: String,
+    /// Optional reason for broken status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    /// The markdown file containing the reference.
+    source: PathBuf,
+    /// Freshness status.
+    status: String,
+    /// The symbol name.
+    symbol: String,
+    /// The target source file.
+    target: PathBuf,
+}
+
+/// JSON output for the status command.
+#[derive(Serialize)]
+struct StatusJson {
+    /// All tracked entries with their statuses and hashes.
+    entries: Vec<StatusEntryJson>,
 }
 
 /// Apply fix actions by rewriting markdown files.
@@ -65,18 +136,85 @@ fn apply_fixes(fixes: &[FixAction]) -> Result<(), error::Error> {
 /// # Errors
 ///
 /// Returns errors from lockfile reading or hash computation.
-pub fn check() -> Result<ExitCode, error::Error> {
+pub fn check(format: &str) -> Result<ExitCode, error::Error> {
+    let output_format = parse_output_format(format)?;
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
-
     let config = config::Config::load(&root)?;
     let lockfile = Lockfile::read(&lock_path)?;
+
+    return match output_format {
+        OutputFormat::Json => check_json(&root, &config, &lockfile),
+        OutputFormat::Text => check_text(&root, &config, &lockfile),
+    };
+}
+
+/// Produce JSON check output and determine exit code.
+///
+/// # Errors
+///
+/// Returns errors from hash computation.
+fn check_json(
+    root: &std::path::Path,
+    config: &config::Config,
+    lockfile: &Lockfile,
+) -> Result<ExitCode, error::Error> {
+    let mut entries: Vec<CheckEntryJson> = Vec::new();
+    let mut summary = CheckSummaryJson { broken: 0, fresh: 0, stale: 0 };
+
+    for entry in &lockfile.entries {
+        let (status, reason) = match compare_lockfile_entry_against_source(root, config, entry)? {
+            CheckResult::Broken(r) => {
+                summary.broken = summary.broken.saturating_add(1);
+                ("broken", Some(r.to_string()))
+            },
+            CheckResult::Fresh => {
+                summary.fresh = summary.fresh.saturating_add(1);
+                ("fresh", None)
+            },
+            CheckResult::Stale => {
+                summary.stale = summary.stale.saturating_add(1);
+                ("stale", None)
+            },
+        };
+        entries.push(CheckEntryJson {
+            reason,
+            source: entry.source.clone(),
+            status: status.to_string(),
+            symbol: entry.symbol.clone(),
+            target: entry.target.clone(),
+        });
+    }
+
+    let broken = summary.broken;
+    let stale = summary.stale;
+    let output = CheckJson { entries, summary };
+    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+
+    if broken > 0 {
+        return Ok(ExitCode::from(2));
+    } else if stale > 0 {
+        return Ok(ExitCode::from(1));
+    }
+    return Ok(ExitCode::SUCCESS);
+}
+
+/// Produce human-readable text check output and determine exit code.
+///
+/// # Errors
+///
+/// Returns errors from hash computation.
+fn check_text(
+    root: &std::path::Path,
+    config: &config::Config,
+    lockfile: &Lockfile,
+) -> Result<ExitCode, error::Error> {
     let mut stale_refs: Vec<String> = Vec::new();
     let mut broken_count = 0_u32;
 
     for entry in &lockfile.entries {
         let refstr = format_ref(&entry.target, &entry.symbol);
-        match compare_lockfile_entry_against_source(&root, &config, entry)? {
+        match compare_lockfile_entry_against_source(root, config, entry)? {
             CheckResult::Broken(reason) => {
                 broken_count = broken_count.saturating_add(1);
                 println!("BROKEN  {refstr} ({reason})");
@@ -90,8 +228,6 @@ pub fn check() -> Result<ExitCode, error::Error> {
     }
 
     let stale_count: u32 = stale_refs.len().try_into().unwrap_or(u32::MAX);
-
-    // Exit code priority: broken (2) > stale (1) > fresh (0).
     if broken_count > 0 {
         println!();
         println!("{broken_count} broken, {stale_count} stale");
@@ -101,11 +237,10 @@ pub fn check() -> Result<ExitCode, error::Error> {
         println!("{stale_count} stale");
         print_update_hints(&stale_refs);
         return Ok(ExitCode::from(1));
-    } else {
-        let total = lockfile.entries.len();
-        println!("All {total} references fresh");
-        return Ok(ExitCode::SUCCESS);
     }
+    let total = lockfile.entries.len();
+    println!("All {total} references fresh");
+    return Ok(ExitCode::SUCCESS);
 }
 
 /// Sort a broken reference into fixable (close match found) or unfixable.
@@ -316,6 +451,21 @@ pub fn init() -> Result<(), error::Error> {
     return Ok(());
 }
 
+/// Parse a format string into an `OutputFormat`.
+///
+/// # Errors
+///
+/// Returns `Error::LockfileCorrupt` (reused as generic user error) for unknown formats.
+fn parse_output_format(s: &str) -> Result<OutputFormat, error::Error> {
+    return match s {
+        "json" => Ok(OutputFormat::Json),
+        "text" => Ok(OutputFormat::Text),
+        _ => Err(error::Error::LockfileCorrupt {
+            reason: format!("unknown format: {s} (expected 'text' or 'json')"),
+        }),
+    };
+}
+
 /// Print a markdown summary of fix results.
 fn print_fix_report(fixes: &[FixAction], unfixable: &[String]) {
     if !fixes.is_empty() {
@@ -351,6 +501,39 @@ fn print_update_hints(stale_refs: &[String]) {
         eprintln!("  docref update {r}");
     }
     return;
+}
+
+/// Show which markdown files reference a given target file or symbol.
+///
+/// # Errors
+///
+/// Returns errors from lockfile reading.
+pub fn refs(reference: &str) -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let lock_path = root.join(".docref.lock");
+
+    let lockfile = Lockfile::read(&lock_path)?;
+    let (file, symbol) = split_reference(reference);
+
+    let mut found = false;
+    for entry in &lockfile.entries {
+        if entry.target != file {
+            continue;
+        }
+        if !symbol.is_empty() && entry.symbol != symbol {
+            continue;
+        }
+        let refstr = format_ref(&entry.target, &entry.symbol);
+        println!("{} -> {refstr}", entry.source.display());
+        found = true;
+    }
+
+    if !found {
+        let refstr = format_ref(&file, &symbol);
+        eprintln!("No references to `{refstr}` found in lockfile.");
+    }
+
+    return Ok(());
 }
 
 /// Re-hash entries at given indices against a single parsed target file.
@@ -442,16 +625,67 @@ fn split_reference(input: &str) -> (PathBuf, String) {
 /// # Errors
 ///
 /// Returns errors from lockfile reading or hash computation.
-pub fn status() -> Result<(), error::Error> {
+pub fn status(format: &str) -> Result<(), error::Error> {
+    let output_format = parse_output_format(format)?;
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
-
     let config = config::Config::load(&root)?;
     let lockfile = Lockfile::read(&lock_path)?;
 
+    return match output_format {
+        OutputFormat::Json => status_json(&root, &config, &lockfile),
+        OutputFormat::Text => status_text(&root, &config, &lockfile),
+    };
+}
+
+/// Produce JSON status output.
+///
+/// # Errors
+///
+/// Returns errors from hash computation.
+fn status_json(
+    root: &std::path::Path,
+    config: &config::Config,
+    lockfile: &Lockfile,
+) -> Result<(), error::Error> {
+    let mut entries: Vec<StatusEntryJson> = Vec::new();
+
+    for entry in &lockfile.entries {
+        let result = compare_lockfile_entry_against_source(root, config, entry)?;
+        let (status_str, reason) = match result {
+            CheckResult::Broken(r) => ("broken", Some(r.to_string())),
+            CheckResult::Fresh => ("fresh", None),
+            CheckResult::Stale => ("stale", None),
+        };
+        entries.push(StatusEntryJson {
+            hash: entry.hash.0.clone(),
+            reason,
+            source: entry.source.clone(),
+            status: status_str.to_string(),
+            symbol: entry.symbol.clone(),
+            target: entry.target.clone(),
+        });
+    }
+
+    let output = StatusJson { entries };
+    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    return Ok(());
+}
+
+/// Produce human-readable text status output.
+///
+/// # Errors
+///
+/// Returns errors from hash computation.
+fn status_text(
+    root: &std::path::Path,
+    config: &config::Config,
+    lockfile: &Lockfile,
+) -> Result<(), error::Error> {
     for entry in &lockfile.entries {
         let refstr = format_ref(&entry.target, &entry.symbol);
-        let label = match compare_lockfile_entry_against_source(&root, &config, entry)? {
+        let result = compare_lockfile_entry_against_source(root, config, entry)?;
+        let label = match result {
             CheckResult::Broken(reason) => {
                 println!("BROKEN  {refstr} ({reason})");
                 continue;
@@ -461,7 +695,6 @@ pub fn status() -> Result<(), error::Error> {
         };
         println!("{label}  {refstr}");
     }
-
     return Ok(());
 }
 

@@ -1,0 +1,35 @@
+[[entries]]
+hash = "46f8486b765c8d96c8e4467c39c3b009d0b1a5a07d956af0a70d9f1a9c987548"
+source = "docs/guide.md"
+symbol = "Config"
+target = "src/app.py"
+
+[[entries]]
+hash = "9d60f97e929d267fe3633767804968db5a8aab6c998e3954c97c1ac18631833a"
+source = "docs/guide.md"
+symbol = "Config.address"
+target = "src/app.py"
+
+[[entries]]
+hash = "5e2b14dfe7574b4414f0b6aa0de381726ae8465435a119844d98c55688bf3723"
+source = "docs/guide.md"
+symbol = "Config.host"
+target = "src/app.py"
+
+[[entries]]
+hash = "73fa34591bbb15dd2dd887b854aaa472dd4b6021fc6f8bfa04e6dabaf30004a7"
+source = "docs/guide.md"
+symbol = "Config.validate"
+target = "src/app.py"
+
+[[entries]]
+hash = "841f5a26864ec8d520bfa3a377c81d5d7f3f7047f934eb6a8870f82cba893041"
+source = "docs/guide.md"
+symbol = "MAX_RETRIES"
+target = "src/app.py"
+
+[[entries]]
+hash = "7e0d12f0b598015922d7f342ffe635c4d3df8f55d2745ad621e0c4214fadf4ec"
+source = "docs/guide.md"
+symbol = "process"
+target = "src/app.py"

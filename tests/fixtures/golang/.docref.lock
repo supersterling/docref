@@ -1,0 +1,47 @@
+[[entries]]
+hash = "08135193c47217a935fb03af7e648c1bc4a304ce13c304bbe2eea7ec6bfc1bf8"
+source = "docs/guide.md"
+symbol = "Config"
+target = "src/main.go"
+
+[[entries]]
+hash = "afe2366b36d3e210b91b0f3724f3206207fe0d5a73e605f211b6aac4737b72b0"
+source = "docs/guide.md"
+symbol = "Config.Host"
+target = "src/main.go"
+
+[[entries]]
+hash = "a4cc802291013114c35a1048ff4e685f1407702a137b79e3b4823614209591c4"
+source = "docs/guide.md"
+symbol = "Config.Validate"
+target = "src/main.go"
+
+[[entries]]
+hash = "1ef729eff98a86ce5aba75ec517137606cacd64280898a0571cfb0132f731be9"
+source = "docs/guide.md"
+symbol = "Handler"
+target = "src/main.go"
+
+[[entries]]
+hash = "d72efefc307302976e541b8868f5d17abe724e6da3b2264ce6e8ead00f0c5714"
+source = "docs/guide.md"
+symbol = "Handler.Handle"
+target = "src/main.go"
+
+[[entries]]
+hash = "cff8aa7be874c351bcf3488415c73d885bd0ba76559457ecd8a57fb9ce17a7f2"
+source = "docs/guide.md"
+symbol = "MaxRetries"
+target = "src/main.go"
+
+[[entries]]
+hash = "f2dd4b9c2db6be8c15e732dd33e67b6eb1d4ec4c88ff4563637bd6f7f73041fb"
+source = "docs/guide.md"
+symbol = "globalState"
+target = "src/main.go"
+
+[[entries]]
+hash = "9c6e4831db2f2cbca8ae1c126e89656e41691bcfffa5b16aa23d523f0dbfdeb8"
+source = "docs/guide.md"
+symbol = "process"
+target = "src/main.go"

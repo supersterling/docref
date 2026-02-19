@@ -114,20 +114,7 @@ fn print_json(state: &CurrentState) {
             ExitCodeInfo { code: 2, meaning: "Broken references found".to_string() },
             ExitCodeInfo { code: 3, meaning: "Runtime error".to_string() },
         ],
-        supported_languages: vec![
-            LanguageInfo {
-                extensions: vec![".rs".to_string()],
-                language: "Rust".to_string(),
-            },
-            LanguageInfo {
-                extensions: vec![".ts".to_string(), ".tsx".to_string()],
-                language: "TypeScript".to_string(),
-            },
-            LanguageInfo {
-                extensions: vec![".md".to_string()],
-                language: "Markdown".to_string(),
-            },
-        ],
+        supported_languages: supported_languages(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
@@ -154,15 +141,69 @@ fn print_markdown(state: &CurrentState) {
     return;
 }
 
-/// Print title and one-line description.
-fn print_section_title(version: &str) {
+/// Print all available commands.
+fn print_section_commands() {
     print!(
         "\
-# docref {version}
+## Commands
 
-Semantic code references for markdown — track code symbols in your docs
-and detect when code changes make them stale.
+    docref init                          Scan markdown, hash symbols, write .docref.lock
+    docref check                         Verify all references (exit 0/1/2)
+    docref status                        Show freshness of all tracked references
+    docref update <file#symbol>          Re-hash after intentional code changes
+    docref update --from <file.md>       Re-hash all refs from a markdown file
+    docref update --all                  Re-hash everything
+    docref fix                           Auto-fix all broken refs (closest match)
+    docref fix <file#sym> <newsym>       Fix a specific broken reference
+    docref resolve <file>                List addressable symbols in a source file
+    docref refs <file#symbol>            Show which markdown files reference a target
+    docref namespace add <name> <path>   Map a short name to a directory
+    docref namespace list                Show all namespace mappings
+    docref namespace remove <name>       Remove a namespace mapping
+    docref namespace rename <old> <new>  Rename (rewrites config + markdown)
+    docref info                          Show this reference document
+    docref info --json                   Machine-readable output
+    docref watch                         Watch source files and re-check on changes
 
+"
+    );
+    return;
+}
+
+/// Print configuration file format and behavior.
+fn print_section_configuration() {
+    print!(
+        "\
+## Configuration (.docref.toml)
+
+    include = [\"docs/\", \"src/\"]         # only scan these paths for markdown
+    exclude = [\"docs/archive/\"]          # skip these within included paths
+    extends = \"../.docref.toml\"          # inherit parent config
+
+    [namespaces]
+    auth = \"services/auth\"               # auth:src/lib.rs -> services/auth/src/lib.rs
+
+Include/exclude patterns are path prefixes, not globs. Without .docref.toml,
+ALL markdown under the project root is scanned. Create a config to avoid
+errors from third-party markdown in node_modules, vendor, etc.
+
+"
+    );
+    return;
+}
+
+/// Print the exit codes table section.
+fn print_section_exit_codes() {
+    print!(
+        "\
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0    | Success / all references fresh |
+| 1    | Stale references found |
+| 2    | Broken references found |
+| 3    | Runtime error |
 "
     );
     return;
@@ -187,18 +228,20 @@ docref hashes each referenced symbol's source code. When code changes,
     return;
 }
 
-/// Print reference syntax with all supported forms.
-fn print_section_reference_syntax() {
+/// Print supported language table.
+fn print_section_languages() {
     print!(
         "\
-## Reference Syntax
+## Supported Languages
 
-    [text](path/to/file.rs#symbol)           symbol reference
-    [text](path/to/file.rs#Type.method)       dot-scoped sub-symbol
-    [text](ns:path/to/file.rs#symbol)         namespaced reference
-    [text](path/to/file.rs)                   whole-file reference (no #symbol)
-
-Use `docref resolve <file>` to list all addressable symbols in a source file.
+| Extension       | Language   |
+|-----------------|------------|
+| .go             | Go         |
+| .js .jsx        | JavaScript |
+| .md             | Markdown   |
+| .py             | Python     |
+| .rs             | Rust       |
+| .ts .tsx        | TypeScript |
 
 "
     );
@@ -232,6 +275,24 @@ Set up namespaces: `docref namespace add <name> <path>`
     return;
 }
 
+/// Print reference syntax with all supported forms.
+fn print_section_reference_syntax() {
+    print!(
+        "\
+## Reference Syntax
+
+    [text](path/to/file.rs#symbol)           symbol reference
+    [text](path/to/file.rs#Type.method)       dot-scoped sub-symbol
+    [text](ns:path/to/file.rs#symbol)         namespaced reference
+    [text](path/to/file.rs)                   whole-file reference (no #symbol)
+
+Use `docref resolve <file>` to list all addressable symbols in a source file.
+
+"
+    );
+    return;
+}
+
 /// Print the recommended setup flow.
 fn print_section_setup() {
     print!(
@@ -247,89 +308,6 @@ IMPORTANT: Without .docref.toml, docref scans ALL markdown files from the
 project root — including node_modules, vendor, .next, etc. Always create
 a config with include patterns before running `docref init`.
 
-"
-    );
-    return;
-}
-
-/// Print all available commands.
-fn print_section_commands() {
-    print!(
-        "\
-## Commands
-
-    docref init                          Scan markdown, hash symbols, write .docref.lock
-    docref check                         Verify all references (exit 0/1/2)
-    docref status                        Show freshness of all tracked references
-    docref update <file#symbol>          Re-hash after intentional code changes
-    docref update --from <file.md>       Re-hash all refs from a markdown file
-    docref update --all                  Re-hash everything
-    docref fix                           Auto-fix all broken refs (closest match)
-    docref fix <file#sym> <newsym>       Fix a specific broken reference
-    docref resolve <file>                List addressable symbols in a source file
-    docref namespace add <name> <path>   Map a short name to a directory
-    docref namespace list                Show all namespace mappings
-    docref namespace remove <name>       Remove a namespace mapping
-    docref namespace rename <old> <new>  Rename (rewrites config + markdown)
-    docref info                          Show this reference document
-    docref info --json                   Machine-readable output
-
-"
-    );
-    return;
-}
-
-/// Print configuration file format and behavior.
-fn print_section_configuration() {
-    print!(
-        "\
-## Configuration (.docref.toml)
-
-    include = [\"docs/\", \"src/\"]         # only scan these paths for markdown
-    exclude = [\"docs/archive/\"]          # skip these within included paths
-    extends = \"../.docref.toml\"          # inherit parent config
-
-    [namespaces]
-    auth = \"services/auth\"               # auth:src/lib.rs -> services/auth/src/lib.rs
-
-Include/exclude patterns are path prefixes, not globs. Without .docref.toml,
-ALL markdown under the project root is scanned. Create a config to avoid
-errors from third-party markdown in node_modules, vendor, etc.
-
-"
-    );
-    return;
-}
-
-/// Print supported language table.
-fn print_section_languages() {
-    print!(
-        "\
-## Supported Languages
-
-| Extension | Language   |
-|-----------|------------|
-| .rs       | Rust       |
-| .ts .tsx  | TypeScript |
-| .md       | Markdown   |
-
-"
-    );
-    return;
-}
-
-/// Print the exit codes table section.
-fn print_section_exit_codes() {
-    print!(
-        "\
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0    | Success / all references fresh |
-| 1    | Stale references found |
-| 2    | Broken references found |
-| 3    | Runtime error |
 "
     );
     return;
@@ -365,6 +343,20 @@ fn print_section_state(state: &CurrentState) {
     return;
 }
 
+/// Print title and one-line description.
+fn print_section_title(version: &str) {
+    print!(
+        "\
+# docref {version}
+
+Semantic code references for markdown — track code symbols in your docs
+and detect when code changes make them stale.
+
+"
+    );
+    return;
+}
+
 /// Output the comprehensive docref reference document.
 pub fn run(json: bool) {
     let root = PathBuf::from(".");
@@ -376,4 +368,22 @@ pub fn run(json: bool) {
         print_markdown(&state);
     }
     return;
+}
+
+/// Build the list of supported languages for JSON output.
+fn supported_languages() -> Vec<LanguageInfo> {
+    return vec![
+        LanguageInfo { extensions: vec![".go".to_string()], language: "Go".to_string() },
+        LanguageInfo {
+            extensions: vec![".js".to_string(), ".jsx".to_string()],
+            language: "JavaScript".to_string(),
+        },
+        LanguageInfo { extensions: vec![".md".to_string()], language: "Markdown".to_string() },
+        LanguageInfo { extensions: vec![".py".to_string()], language: "Python".to_string() },
+        LanguageInfo { extensions: vec![".rs".to_string()], language: "Rust".to_string() },
+        LanguageInfo {
+            extensions: vec![".ts".to_string(), ".tsx".to_string()],
+            language: "TypeScript".to_string(),
+        },
+    ];
 }
