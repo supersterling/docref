@@ -290,10 +290,18 @@ fn find_declaration_by_bare_name(
     let matches: Vec<&Declaration> = declarations.iter().filter(|d| d.name == name).collect();
 
     match matches.len() {
-        0 => Err(Error::SymbolNotFound {
-            file: file_path.to_path_buf(),
-            symbol: name.to_string(),
-        }),
+        0 => {
+            let suggestions: Vec<String> = declarations
+                .iter()
+                .map(|d| d.qualified_name.clone())
+                .take(10)
+                .collect();
+            Err(Error::SymbolNotFound {
+                file: file_path.to_path_buf(),
+                symbol: name.to_string(),
+                suggestions,
+            })
+        },
         1 => Ok(declaration_to_resolved_symbol(matches[0])),
         _ => {
             let candidates = matches.iter().map(|d| d.qualified_name.clone()).collect();
@@ -323,9 +331,17 @@ fn find_declaration_by_qualified_dotpath(
         .iter()
         .find(|d| d.qualified_name == qualified)
         .map(declaration_to_resolved_symbol)
-        .ok_or_else(|| Error::SymbolNotFound {
-            file: file_path.to_path_buf(),
-            symbol: qualified,
+        .ok_or_else(|| {
+            let suggestions: Vec<String> = declarations
+                .iter()
+                .map(|d| d.qualified_name.clone())
+                .take(10)
+                .collect();
+            Error::SymbolNotFound {
+                file: file_path.to_path_buf(),
+                symbol: qualified,
+                suggestions,
+            }
         })
 }
 

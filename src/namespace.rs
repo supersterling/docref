@@ -37,7 +37,7 @@ pub fn cmd_list() -> Result<(), error::Error> {
 pub fn cmd_add(name: &str, path: &str) -> Result<(), error::Error> {
     let root = PathBuf::from(".");
     add_to_config(&root, name, path)?;
-    println!("Added namespace: {name} -> {path}");
+    eprintln!("Added namespace: {name} -> {path}");
     Ok(())
 }
 
@@ -62,7 +62,7 @@ pub fn cmd_rename(old: &str, new: &str) -> Result<(), error::Error> {
     let config = config::Config::load(&root)?;
     rewrite_in_markdown_files(&root, &config, old, new)?;
 
-    println!("Renamed namespace: {old} -> {new}");
+    eprintln!("Renamed namespace: {old} -> {new}");
     Ok(())
 }
 
@@ -107,7 +107,7 @@ pub fn cmd_remove(name: &str, force: bool) -> Result<(), error::Error> {
         lockfile.write(&lock_path)?;
     }
 
-    println!("Removed namespace: {name}");
+    eprintln!("Removed namespace: {name}");
     Ok(())
 }
 

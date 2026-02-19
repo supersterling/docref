@@ -8,6 +8,7 @@ pub enum Error {
     SymbolNotFound {
         file: PathBuf,
         symbol: String,
+        suggestions: Vec<String>,
     },
 
     #[error(
@@ -63,6 +64,11 @@ pub enum Error {
     #[error("config cycle detected: {}", chain.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" -> "))]
     ConfigCycle {
         chain: Vec<PathBuf>,
+    },
+
+    #[error("lockfile not found: {}", path.display())]
+    LockfileNotFound {
+        path: PathBuf,
     },
 
     #[error("lockfile corrupt: {reason}")]

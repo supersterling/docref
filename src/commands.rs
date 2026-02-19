@@ -1,15 +1,18 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use crate::config;
 use crate::error;
+use crate::freshness::{
+    CheckResult, compare_lockfile_entry_against_source, parse_symbol_query,
+    resolve_and_hash_all_references,
+};
 use crate::grammar;
 use crate::hasher;
-use crate::lockfile::{LockEntry, Lockfile};
+use crate::lockfile::Lockfile;
 use crate::resolver;
 use crate::scanner;
-use crate::types::{Reference, SymbolQuery};
 
 // ── Core commands ─────────────────────────────────────────────────────
 
@@ -29,7 +32,7 @@ pub fn init() -> Result<(), error::Error> {
 
     lockfile.write(&lock_path)?;
     let count = lockfile.entries.len();
-    println!("Wrote {count} references to .docref.lock");
+    eprintln!("Wrote {count} references to .docref.lock");
 
     Ok(())
 }
@@ -45,13 +48,17 @@ pub fn check() -> Result<ExitCode, error::Error> {
 
     let config = config::Config::load(&root)?;
     let lockfile = Lockfile::read(&lock_path)?;
-    let mut stale_count = 0u32;
+    let mut stale_refs: Vec<String> = Vec::new();
     let mut broken_count = 0u32;
 
     for entry in &lockfile.entries {
         match compare_lockfile_entry_against_source(&root, &config, entry)? {
             CheckResult::Fresh => {},
-            CheckResult::Stale => stale_count += 1,
+            CheckResult::Stale => {
+                let refstr = format!("{}#{}", entry.target.display(), entry.symbol);
+                println!("STALE   {refstr}");
+                stale_refs.push(refstr);
+            },
             CheckResult::Broken(reason) => {
                 broken_count += 1;
                 println!(
@@ -63,21 +70,31 @@ pub fn check() -> Result<ExitCode, error::Error> {
         }
     }
 
-    if stale_count > 0 {
-        println!();
-    }
+    let stale_count: u32 = stale_refs.len().try_into().unwrap_or(u32::MAX);
 
     // Exit code priority: broken (2) > stale (1) > fresh (0).
     if broken_count > 0 {
+        println!();
         println!("{broken_count} broken, {stale_count} stale");
         Ok(ExitCode::from(2))
-    } else if stale_count > 0 {
+    } else if !stale_refs.is_empty() {
+        println!();
         println!("{stale_count} stale");
+        print_update_hints(&stale_refs);
         Ok(ExitCode::from(1))
     } else {
         let total = lockfile.entries.len();
         println!("All {total} references fresh");
         Ok(ExitCode::SUCCESS)
+    }
+}
+
+/// Print recovery hints to stderr showing exact update commands.
+fn print_update_hints(stale_refs: &[String]) {
+    eprintln!();
+    eprintln!("hint: run `docref update <ref>` to accept changes:");
+    for r in stale_refs {
+        eprintln!("  docref update {r}");
     }
 }
 
@@ -145,7 +162,7 @@ pub fn resolve(file: &str, symbol: Option<&str>) -> Result<(), error::Error> {
 /// # Errors
 ///
 /// Returns errors from lockfile I/O, resolution, or hashing.
-pub fn accept(reference: &str) -> Result<(), error::Error> {
+pub fn update(reference: &str) -> Result<(), error::Error> {
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
 
@@ -173,11 +190,12 @@ pub fn accept(reference: &str) -> Result<(), error::Error> {
         return Err(error::Error::SymbolNotFound {
             file,
             symbol,
+            suggestions: vec![],
         });
     }
 
     lockfile.write(&lock_path)?;
-    println!("Accepted {}#{symbol}", file.display());
+    eprintln!("Updated {}#{symbol}", file.display());
 
     Ok(())
 }
@@ -188,7 +206,7 @@ pub fn accept(reference: &str) -> Result<(), error::Error> {
 /// # Errors
 ///
 /// Returns errors from lockfile I/O, resolution, or hashing.
-pub fn accept_file(source_file: &str) -> Result<(), error::Error> {
+pub fn update_file(source_file: &str) -> Result<(), error::Error> {
     let root = PathBuf::from(".");
     let lock_path = root.join(".docref.lock");
     let source_path = PathBuf::from(source_file);
@@ -237,7 +255,42 @@ pub fn accept_file(source_file: &str) -> Result<(), error::Error> {
 
     lockfile.write(&lock_path)?;
     let count = matching_indices.len();
-    println!("Accepted {count} references from {source_file}");
+    eprintln!("Updated {count} references from {source_file}");
+
+    Ok(())
+}
+
+/// Output a comprehensive reference document for docref.
+pub fn info(json: bool) {
+    crate::info::run(json);
+}
+
+/// Re-hash every lockfile entry. Semantically equivalent to `init` but
+/// preserves intent: "I know the code changed, update everything."
+///
+/// # Errors
+///
+/// Returns errors from lockfile I/O, resolution, or hashing.
+pub fn update_all() -> Result<(), error::Error> {
+    let root = PathBuf::from(".");
+    let lock_path = root.join(".docref.lock");
+
+    let config = config::Config::load(&root)?;
+    let mut lockfile = Lockfile::read(&lock_path)?;
+
+    for entry in &mut lockfile.entries {
+        let disk_path = config.resolve_target(&entry.target)?;
+        let source = std::fs::read_to_string(root.join(&disk_path))
+            .map_err(|_| error::Error::FileNotFound { path: disk_path.clone() })?;
+        let language = grammar::language_for_path(&disk_path)?;
+        let query = parse_symbol_query(&entry.symbol);
+        let resolved = resolver::resolve(&disk_path, &source, &language, &query)?;
+        entry.hash = hasher::hash_symbol(&source, &language, &resolved)?;
+    }
+
+    lockfile.write(&lock_path)?;
+    let count = lockfile.entries.len();
+    eprintln!("Updated {count} references");
 
     Ok(())
 }
@@ -257,102 +310,4 @@ fn split_reference(input: &str) -> Result<(PathBuf, String), error::Error> {
         });
     };
     Ok((PathBuf::from(file), symbol.to_string()))
-}
-
-/// Result of checking a single lockfile entry.
-enum CheckResult {
-    Fresh,
-    Stale,
-    Broken(&'static str),
-}
-
-/// Check one lockfile entry against the current source.
-///
-/// # Errors
-///
-/// Returns errors from resolution or hashing that aren't recoverable as broken/stale.
-fn compare_lockfile_entry_against_source(
-    root: &Path,
-    config: &config::Config,
-    entry: &LockEntry,
-) -> Result<CheckResult, error::Error> {
-    let Ok(disk_path) = config.resolve_target(&entry.target) else {
-        return Ok(CheckResult::Broken("unknown namespace"));
-    };
-    let target_path = root.join(&disk_path);
-    let Ok(source) = std::fs::read_to_string(&target_path) else {
-        return Ok(CheckResult::Broken("file not found"));
-    };
-
-    let Ok(language) = grammar::language_for_path(&disk_path) else {
-        return Ok(CheckResult::Broken("unsupported language"));
-    };
-
-    let query = parse_symbol_query(&entry.symbol);
-    let resolved = match resolver::resolve(&disk_path, &source, &language, &query) {
-        Ok(r) => r,
-        Err(error::Error::SymbolNotFound { .. }) => {
-            return Ok(CheckResult::Broken("symbol removed"));
-        },
-        Err(e) => return Err(e),
-    };
-
-    let new_hash = hasher::hash_symbol(&source, &language, &resolved)?;
-    if new_hash == entry.hash {
-        Ok(CheckResult::Fresh)
-    } else {
-        println!("STALE   {}#{}", entry.target.display(), entry.symbol);
-        Ok(CheckResult::Stale)
-    }
-}
-
-/// Resolve all references and produce lockfile entries.
-/// Groups are already keyed by target file, so each file is parsed once.
-///
-/// # Errors
-///
-/// Returns errors from file reading, language detection, resolution, or hashing.
-fn resolve_and_hash_all_references(
-    root: &Path,
-    config: &config::Config,
-    grouped: &HashMap<PathBuf, Vec<Reference>>,
-) -> Result<Vec<LockEntry>, error::Error> {
-    let mut entries = Vec::new();
-
-    for (target, refs) in grouped {
-        let disk_path = config.resolve_target(target)?;
-        let target_path = root.join(&disk_path);
-        let source =
-            std::fs::read_to_string(&target_path).map_err(|_| error::Error::FileNotFound {
-                path: target_path.clone(),
-            })?;
-
-        let language = grammar::language_for_path(&disk_path)?;
-
-        for reference in refs {
-            let resolved = resolver::resolve(&disk_path, &source, &language, &reference.symbol)?;
-            let hash = hasher::hash_symbol(&source, &language, &resolved)?;
-
-            entries.push(LockEntry {
-                source: reference.source.clone(),
-                target: reference.target.clone(),
-                symbol: reference.symbol.display_name(),
-                hash,
-            });
-        }
-    }
-
-    Ok(entries)
-}
-
-/// Parse a symbol string into bare or dot-scoped form.
-fn parse_symbol_query(symbol: &str) -> SymbolQuery {
-    if let Some((parent, child)) = symbol.split_once('.') {
-        SymbolQuery::Scoped {
-            parent: parent.to_string(),
-            child: child.to_string(),
-        }
-    } else {
-        SymbolQuery::Bare(symbol.to_string())
-    }
 }

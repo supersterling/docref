@@ -99,7 +99,7 @@ fn check_detects_broken_reference() {
 }
 
 #[test]
-fn accept_updates_stale_reference() {
+fn update_updates_stale_reference() {
     let (_tmp, dir) = isolated_fixture("basic");
     let src = dir.join("src/lib.rs");
 
@@ -115,22 +115,22 @@ fn accept_updates_stale_reference() {
     let check = docref_at(&dir).arg("check").output().unwrap();
     assert_eq!(check.status.code().unwrap(), 1);
 
-    // Accept the specific reference.
-    let accept = docref_at(&dir)
-        .args(["accept", "src/lib.rs#A"])
+    // Update the specific reference.
+    let update = docref_at(&dir)
+        .args(["update", "src/lib.rs#A"])
         .output()
         .unwrap();
     assert!(
-        accept.status.success(),
-        "accept failed: {}",
-        String::from_utf8_lossy(&accept.stderr)
+        update.status.success(),
+        "update failed: {}",
+        String::from_utf8_lossy(&update.stderr)
     );
 
     // Check should pass now.
     let check = docref_at(&dir).arg("check").output().unwrap();
     assert!(
         check.status.success(),
-        "check still failing after accept: {}",
+        "check still failing after update: {}",
         String::from_utf8_lossy(&check.stdout)
     );
 }
@@ -633,7 +633,7 @@ fn namespace_add_creates_mapping() {
 }
 
 #[test]
-fn accept_file_updates_all_refs_in_doc() {
+fn update_from_file_updates_all_refs_in_doc() {
     let (_tmp, dir) = isolated_fixture("basic");
     let src = dir.join("src/lib.rs");
 
@@ -652,23 +652,23 @@ fn accept_file_updates_all_refs_in_doc() {
     let check = docref_at(&dir).arg("check").output().unwrap();
     assert_eq!(check.status.code().unwrap(), 1, "expected stale");
 
-    // Accept all refs originating from guide.md.
-    let accept = docref_at(&dir)
-        .args(["accept", "--file", "docs/guide.md"])
+    // Update all refs originating from guide.md.
+    let update = docref_at(&dir)
+        .args(["update", "--from", "docs/guide.md"])
         .output()
         .unwrap();
     assert!(
-        accept.status.success(),
-        "accept --file failed: {}",
-        String::from_utf8_lossy(&accept.stderr)
+        update.status.success(),
+        "update --from failed: {}",
+        String::from_utf8_lossy(&update.stderr)
     );
 
-    // Check should pass now — guide.md's refs are accepted,
+    // Check should pass now — guide.md's refs are updated,
     // and api.md's refs (app.ts) were never stale.
     let check = docref_at(&dir).arg("check").output().unwrap();
     assert!(
         check.status.success(),
-        "check still failing after accept --file: {}",
+        "check still failing after update --from: {}",
         String::from_utf8_lossy(&check.stdout)
     );
 }

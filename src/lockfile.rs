@@ -83,11 +83,18 @@ impl Lockfile {
     ///
     /// # Errors
     ///
-    /// Returns `Error::Io` if the file cannot be read,
+    /// Returns `Error::LockfileNotFound` if the file doesn't exist,
+    /// `Error::Io` for other read failures,
     /// `Error::TomlDe` if the content is invalid TOML,
     /// or `Error::LockfileCorrupt` if entries are not sorted.
     pub fn read(path: &Path) -> Result<Self, Error> {
-        let content = std::fs::read_to_string(path)?;
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Error::LockfileNotFound { path: path.to_path_buf() });
+            },
+            Err(e) => return Err(Error::Io(e)),
+        };
         Self::parse(&content)
     }
 }
