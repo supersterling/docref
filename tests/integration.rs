@@ -672,3 +672,167 @@ fn update_from_file_updates_all_refs_in_doc() {
         String::from_utf8_lossy(&check.stdout)
     );
 }
+
+// --- Sub-declaration tests ---
+
+#[test]
+fn subdecl_init_then_check_passes() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
+fn subdecl_struct_field_in_lockfile() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("Config.host"),
+        "lockfile missing Config.host: {content}"
+    );
+}
+
+#[test]
+fn subdecl_enum_variant_in_lockfile() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("Message.Quit"),
+        "lockfile missing Message.Quit: {content}"
+    );
+}
+
+#[test]
+fn subdecl_trait_method_in_lockfile() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("Handler.handle"),
+        "lockfile missing Handler.handle: {content}"
+    );
+}
+
+#[test]
+fn subdecl_ts_interface_prop_in_lockfile() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("ServerConfig.host"),
+        "lockfile missing ServerConfig.host: {content}"
+    );
+}
+
+#[test]
+fn subdecl_ts_class_method_in_lockfile() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("App.render"),
+        "lockfile missing App.render: {content}"
+    );
+}
+
+#[test]
+fn subdecl_ts_enum_member_in_lockfile() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let content = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(
+        content.contains("Status.Active"),
+        "lockfile missing Status.Active: {content}"
+    );
+    assert!(
+        content.contains("Direction.Up"),
+        "lockfile missing Direction.Up: {content}"
+    );
+}
+
+#[test]
+fn subdecl_field_change_detected_stale() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Change the type of the host field.
+    let modified = original.replace("host: String", "host: Vec<u8>");
+    std::fs::write(&src, &modified).unwrap();
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(code, 1, "expected exit 1 (stale), got {code}\nstdout: {stdout}");
+}
+
+#[test]
+fn subdecl_resolve_lists_sub_symbols() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "src/lib.rs"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Config.host"), "missing Config.host: {stdout}");
+    assert!(stdout.contains("Message.Quit"), "missing Message.Quit: {stdout}");
+    assert!(stdout.contains("Handler.handle"), "missing Handler.handle: {stdout}");
+}
+
+#[test]
+fn subdecl_field_removal_detected_broken() {
+    let (_tmp, dir) = isolated_fixture("subdecl");
+    let src = dir.join("src/lib.rs");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    // Remove the host field entirely.
+    let broken = original.replace("    host: String,\n", "");
+    std::fs::write(&src, &broken).unwrap();
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(code, 2, "expected exit 2 (broken), got {code}\nstdout: {stdout}");
+}

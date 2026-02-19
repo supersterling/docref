@@ -25,6 +25,45 @@ pub struct SymbolInfo {
     pub name: String,
 }
 
+/// Collect members from a TypeScript class, qualified as "Class.member".
+fn collect_class_members(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Ok(class_name) = name_node.utf8_text(source.as_bytes()) else {
+        return;
+    };
+    let class_name = class_name.to_string();
+
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() != "method_definition" && child.kind() != "public_field_definition" {
+            continue;
+        }
+        let Some(name_child) = first_child_of_kind(child, "property_identifier") else {
+            continue;
+        };
+        let Ok(member_name) = name_child.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: member_name.to_string(),
+            qualified_name: format!("{class_name}.{member_name}"),
+        });
+    }
+}
+
 /// Dispatch to the correct collector based on file extension.
 fn collect_declarations(root: Node<'_>, source: &str, ext: &str) -> Vec<Declaration> {
     return match ext {
@@ -33,6 +72,67 @@ fn collect_declarations(root: Node<'_>, source: &str, ext: &str) -> Vec<Declarat
         "md" | "markdown" => collect_md_declarations(root, source),
         _ => Vec::new(),
     };
+}
+
+/// Collect members from a TypeScript enum, qualified as "Enum.Member".
+fn collect_enum_members(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Ok(enum_name) = name_node.utf8_text(source.as_bytes()) else {
+        return;
+    };
+    let enum_name = enum_name.to_string();
+
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if let Some(decl) = ts_enum_member_declaration(child, source, &enum_name) {
+            declarations.push(decl);
+        }
+    }
+}
+
+/// Collect variants from a Rust enum, qualified as "Enum.Variant".
+fn collect_enum_variants(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Ok(enum_name) = name_node.utf8_text(source.as_bytes()) else {
+        return;
+    };
+    let enum_name = enum_name.to_string();
+
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() != "enum_variant" {
+            continue;
+        }
+        let Some(variant_name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(variant_name) = variant_name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: variant_name.to_string(),
+            qualified_name: format!("{enum_name}.{variant_name}"),
+        });
+    }
 }
 
 /// Collect methods from a Rust impl block, qualified as "Type.method".
@@ -54,6 +154,49 @@ fn collect_impl_methods(impl_node: Node<'_>, source: &str, declarations: &mut Ve
         if let Some(decl) = impl_method_declaration(child, source, &type_name) {
             declarations.push(decl);
         }
+    }
+}
+
+/// Collect properties from a TypeScript interface, qualified as "Interface.prop".
+fn collect_interface_properties(
+    node: Node<'_>,
+    source: &str,
+    declarations: &mut Vec<Declaration>,
+) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Ok(iface_name) = name_node.utf8_text(source.as_bytes()) else {
+        return;
+    };
+    let iface_name = iface_name.to_string();
+
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() != "property_signature" {
+            continue;
+        }
+        let Some(prop_node) = first_child_of_kind(child, "property_identifier") else {
+            continue;
+        };
+        let Ok(prop_name) = prop_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: prop_name.to_string(),
+            qualified_name: format!("{iface_name}.{prop_name}"),
+        });
     }
 }
 
@@ -80,9 +223,96 @@ fn collect_rust_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
         if node.kind() == "impl_item" {
             collect_impl_methods(node, source, &mut declarations);
         }
+        if node.kind() == "struct_item" {
+            collect_struct_fields(node, source, &mut declarations);
+        }
+        if node.kind() == "enum_item" {
+            collect_enum_variants(node, source, &mut declarations);
+        }
+        if node.kind() == "trait_item" {
+            collect_trait_methods(node, source, &mut declarations);
+        }
     }
 
     return declarations;
+}
+
+/// Collect fields from a Rust struct, qualified as "Struct.field".
+fn collect_struct_fields(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Ok(struct_name) = name_node.utf8_text(source.as_bytes()) else {
+        return;
+    };
+    let struct_name = struct_name.to_string();
+
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+        let Some(field_name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(field_name) = field_name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: field_name.to_string(),
+            qualified_name: format!("{struct_name}.{field_name}"),
+        });
+    }
+}
+
+/// Collect method signatures and default methods from a Rust trait, qualified as "Trait.method".
+fn collect_trait_methods(node: Node<'_>, source: &str, declarations: &mut Vec<Declaration>) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Ok(trait_name) = name_node.utf8_text(source.as_bytes()) else {
+        return;
+    };
+    let trait_name = trait_name.to_string();
+
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() != "function_signature_item" && child.kind() != "function_item" {
+            continue;
+        }
+        let Some(method_name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        let Ok(method_name) = method_name_node.utf8_text(source.as_bytes()) else {
+            continue;
+        };
+        let Some(start) = u32::try_from(child.start_byte()).ok() else {
+            continue;
+        };
+        let Some(end) = u32::try_from(child.end_byte()).ok() else {
+            continue;
+        };
+        declarations.push(Declaration {
+            byte_range: start..end,
+            name: method_name.to_string(),
+            qualified_name: format!("{trait_name}.{method_name}"),
+        });
+    }
 }
 
 /// Walk the tree and collect all named TypeScript declarations.
@@ -102,6 +332,15 @@ fn collect_ts_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
         }
         if inner.kind() == "lexical_declaration" {
             collect_ts_variable_declarators(inner, source, &mut declarations);
+        }
+        if inner.kind() == "interface_declaration" {
+            collect_interface_properties(inner, source, &mut declarations);
+        }
+        if inner.kind() == "class_declaration" {
+            collect_class_members(inner, source, &mut declarations);
+        }
+        if inner.kind() == "enum_declaration" {
+            collect_enum_members(inner, source, &mut declarations);
         }
     }
 
@@ -258,6 +497,12 @@ fn find_declaration_by_qualified_dotpath(
         .ok_or_else(|| {
             return symbol_not_found_error(file_path, &qualified, declarations);
         });
+}
+
+/// Find the first child of a specific node kind.
+fn first_child_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let mut cursor = node.walk();
+    return node.children(&mut cursor).find(|c| return c.kind() == kind);
 }
 
 /// Check whether a heading is an h1 (document title) by looking for `atx_h1_marker`.
@@ -454,6 +699,30 @@ fn symbol_not_found_error(
         suggestions,
         symbol: name.to_string(),
     };
+}
+
+/// Extract a single enum member declaration from a TypeScript enum body child.
+fn ts_enum_member_declaration(
+    node: Node<'_>,
+    source: &str,
+    enum_name: &str,
+) -> Option<Declaration> {
+    let name_text = match node.kind() {
+        "enum_assignment" => {
+            let prop_node = first_child_of_kind(node, "property_identifier")?;
+            prop_node.utf8_text(source.as_bytes()).ok()?
+        }
+        "property_identifier" => node.utf8_text(source.as_bytes()).ok()?,
+        _ => return None,
+    };
+    let start = u32::try_from(node.start_byte()).ok()?;
+    let end = u32::try_from(node.end_byte()).ok()?;
+
+    return Some(Declaration {
+        byte_range: start..end,
+        name: name_text.to_string(),
+        qualified_name: format!("{enum_name}.{name_text}"),
+    });
 }
 
 /// Try to extract a top-level TypeScript declaration with a direct "name" field.
