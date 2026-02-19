@@ -39,6 +39,7 @@ impl SymbolQuery {
 pub struct SourceRef {
     pub file: PathBuf,
     pub line: u32,
+    pub content: String,
 }
 
 /// Output of successful symbol resolution. Byte range is guaranteed

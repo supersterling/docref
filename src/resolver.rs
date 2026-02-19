@@ -205,16 +205,38 @@ fn collect_ts_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
     let mut cursor = root.walk();
 
     for node in root.children(&mut cursor) {
-        if let Some(decl) = ts_top_level_declaration(node, source) {
+        // `export function foo()` etc. wrap the real declaration in an export_statement.
+        let inner = if node.kind() == "export_statement" {
+            unwrap_export(node)
+        } else {
+            node
+        };
+
+        if let Some(decl) = ts_top_level_declaration(inner, source) {
             declarations.push(decl);
         }
-        // lexical_declaration wraps variable_declarator(s).
-        if node.kind() == "lexical_declaration" {
-            collect_ts_variable_declarators(node, source, &mut declarations);
+        if inner.kind() == "lexical_declaration" {
+            collect_ts_variable_declarators(inner, source, &mut declarations);
         }
     }
 
     declarations
+}
+
+/// Unwrap an `export_statement` to its inner declaration node.
+/// Falls back to the export node itself if no declaration child is found.
+fn unwrap_export(export: Node<'_>) -> Node<'_> {
+    let mut cursor = export.walk();
+    for child in export.children(&mut cursor) {
+        match child.kind() {
+            "function_declaration" | "class_declaration" | "interface_declaration"
+            | "type_alias_declaration" | "enum_declaration" | "lexical_declaration" => {
+                return child;
+            }
+            _ => {}
+        }
+    }
+    export
 }
 
 /// Try to extract a top-level TypeScript declaration with a direct "name" field.

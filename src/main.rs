@@ -55,6 +55,19 @@ Examples:
   docref update --from docs/guide.md
   docref update --all";
 
+const FIX_HELP: &str = "\
+Auto-corrects references where the symbol name is a close match
+(e.g., missing generic parameters). Rewrites markdown in-place.
+
+Modes:
+  docref fix                                    Auto-fix all (closest match)
+  docref fix src/lib.rs#old_symbol new_symbol   Replace with a specific symbol
+
+Examples:
+  docref fix                                         Fix all broken references
+  docref fix src/lib.rs#RingBuffer.new 'RingBuffer<T>.new'
+  docref init || docref fix                          Init, fix if broken";
+
 const RESOLVE_HELP: &str = "\
 Examples:
   docref resolve src/lib.rs              List all symbols
@@ -108,6 +121,14 @@ enum Commands {
         /// Path to the source file
         file: String,
         /// Optional symbol name to resolve
+        symbol: Option<String>,
+    },
+    /// Auto-fix broken references when a close match exists
+    #[command(after_help = FIX_HELP)]
+    Fix {
+        /// Broken reference in `file#symbol` format (e.g., `src/lib.rs#old_name`)
+        reference: Option<String>,
+        /// Replacement symbol name (required when reference is specified)
         symbol: Option<String>,
     },
     /// Show all tracked references and their current freshness
@@ -165,6 +186,7 @@ fn main() -> ExitCode {
         Commands::Resolve { file, symbol } => {
             commands::resolve(&file, symbol.as_deref()).map(|()| ExitCode::SUCCESS)
         },
+        Commands::Fix { reference, symbol } => dispatch_fix(reference, symbol),
         Commands::Status => commands::status().map(|()| ExitCode::SUCCESS),
         Commands::Info { json } => {
             commands::info(json);
@@ -203,6 +225,25 @@ fn dispatch_update(
                 Ok(ExitCode::FAILURE)
             },
         }
+    }
+}
+
+/// Route the `fix` subcommand to the right handler.
+///
+/// # Errors
+///
+/// Returns errors from the underlying fix operation.
+fn dispatch_fix(
+    reference: Option<String>,
+    symbol: Option<String>,
+) -> Result<ExitCode, error::Error> {
+    match (reference, symbol) {
+        (None, None) => commands::fix().map(|()| ExitCode::SUCCESS),
+        (Some(r), Some(s)) => commands::fix_targeted(&r, &s).map(|()| ExitCode::SUCCESS),
+        _ => {
+            eprintln!("error: provide both a file#symbol reference and a replacement symbol, or neither");
+            Ok(ExitCode::FAILURE)
+        },
     }
 }
 

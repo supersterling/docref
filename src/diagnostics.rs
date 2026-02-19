@@ -3,11 +3,19 @@ use std::fmt::Write as _;
 use crate::error::Error;
 use crate::types::SourceRef;
 
-/// Render an error as terminal-formatted markdown and print to stderr.
+const BOLD: &str = "\x1b[1m";
+const RESET: &str = "\x1b[0m";
+
+/// Render an error as valid markdown with bold headings and print to stderr.
 pub fn print_error(e: &Error) {
     let md = render_error(e);
-    let skin = termimad::MadSkin::default();
-    eprintln!("{}", skin.term_text(&md));
+    for line in md.lines() {
+        if line.starts_with('#') {
+            eprintln!("{BOLD}{line}{RESET}");
+        } else {
+            eprintln!("{line}");
+        }
+    }
 }
 
 /// Render an error as a structured markdown diagnostic.
@@ -34,39 +42,70 @@ pub fn render_error(e: &Error) -> String {
 
 fn render_generic(e: &Error) -> String {
     match e {
-        Error::FileNotFound { path } => {
-            format!("# Error: File Not Found\n\n`{}` does not exist.\n", path.display())
-        },
-        Error::ConfigNotFound { path } => {
-            format!(
-                "# Error: Config Not Found\n\n`{}` does not exist.\n\n## Fix\n\nCheck the `extends` path in your `.docref.toml`.\n",
-                path.display()
-            )
-        },
-        Error::LockfileCorrupt { reason } => {
-            format!(
-                "# Error: Lockfile Corrupt\n\n{reason}\n\n## Fix\n\nRegenerate the lockfile:\n\n    docref init\n"
-            )
-        },
-        Error::ParseFailed { file, reason } => {
-            format!(
-                "# Error: Parse Failed\n\nCould not parse `{}`: {reason}\n",
-                file.display()
-            )
-        },
-        Error::Io(e) => format!("# Error: I/O\n\n{e}\n"),
-        Error::TomlDe(e) => format!("# Error: Invalid TOML\n\n{e}\n"),
-        Error::TomlSer(e) => format!("# Error: TOML Serialization\n\n{e}\n"),
+        Error::FileNotFound { path } => format!("\
+# Error: File Not Found
+
+`{}` does not exist.
+", path.display()),
+
+        Error::ConfigNotFound { path } => format!("\
+# Error: Config Not Found
+
+`{}` does not exist.
+
+## Fix
+
+Check the `extends` path in your `.docref.toml`.
+", path.display()),
+
+        Error::LockfileCorrupt { reason } => format!("\
+# Error: Lockfile Corrupt
+
+{reason}
+
+## Fix
+
+Regenerate the lockfile:
+
+    docref init
+"),
+
+        Error::ParseFailed { file, reason } => format!("\
+# Error: Parse Failed
+
+Could not parse `{}`: {reason}
+", file.display()),
+
+        Error::Io(e) => format!("\
+# Error: I/O
+
+{e}
+"),
+        Error::TomlDe(e) => format!("\
+# Error: Invalid TOML
+
+{e}
+"),
+        Error::TomlSer(e) => format!("\
+# Error: TOML Serialization
+
+{e}
+"),
         // Already handled in render_error, but need exhaustive match.
-        _ => format!("# Error\n\n{e}\n"),
+        _ => format!("\
+# Error
+
+{e}
+"),
     }
 }
 
 fn render_file_too_large(file: &std::path::Path, size_bytes: u64, max_bytes: u64) -> String {
-    format!(
-        "# Error: File Too Large\n\n`{}` is {size_bytes} bytes (max {max_bytes}).\n",
-        file.display()
-    )
+    format!("\
+# Error: File Too Large
+
+`{}` is {size_bytes} bytes (max {max_bytes}).
+", file.display())
 }
 
 fn render_lockfile_not_found() -> String {
@@ -90,40 +129,85 @@ fn render_symbol_not_found(
     suggestions: &[String],
     referenced_from: &[SourceRef],
 ) -> String {
-    let mut out = format!(
-        "# Error: Symbol Not Found\n\nSymbol `{symbol}` does not exist in `{file}`.\n"
-    );
+    let mut out = format!("\
+# Error: Symbol Not Found
+
+Symbol `{symbol}` does not exist in `{file}`.
+");
 
     if !referenced_from.is_empty() {
-        out.push('\n');
-        let _ = writeln!(out, "## Referenced from\n");
+        out.push_str("\n## Referenced from\n\n");
         for src in referenced_from {
             let _ = writeln!(out, "- {}:{}", src.file.display(), src.line);
+            let _ = writeln!(out, "  {}", src.content);
         }
     }
 
-    if !suggestions.is_empty() {
-        out.push('\n');
-        let _ = writeln!(out, "## Available symbols\n");
+    let best = find_closest_suggestion(symbol, suggestions);
+
+    if let Some(suggestion) = &best {
+        let _ = write!(out, "\n## Did you mean `{suggestion}`?\n\n");
+        if let Some(src) = referenced_from.first().filter(|s| !s.content.is_empty()) {
+            let fixed = src.content.replace(&format!("#{symbol}"), &format!("#{suggestion}"));
+            let _ = writeln!(out, "    {fixed}");
+        }
+        out.push_str("\
+\n## Fix
+
+    docref fix
+");
+    } else if !suggestions.is_empty() {
+        out.push_str("\n## Available symbols\n\n");
         for s in suggestions {
             let _ = writeln!(out, "- `{s}`");
         }
     }
 
-    out.push('\n');
-    let _ = write!(out, "## Fix\n\n    docref resolve {file}    # list all symbols in this file\n");
+    out
+}
+
+/// Find the closest matching suggestion by stripping generics and comparing.
+pub(crate) fn find_closest_suggestion(symbol: &str, suggestions: &[String]) -> Option<String> {
+    let normalized = strip_generics(symbol);
+    suggestions.iter()
+        .find(|s| strip_generics(s) == normalized)
+        .cloned()
+}
+
+/// Remove generic parameters (`<...>`) from a symbol name for fuzzy comparison.
+fn strip_generics(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth = 0u32;
+    for ch in s.chars() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(ch),
+            _ => {}
+        }
+    }
     out
 }
 
 fn render_ambiguous_symbol(file: &str, symbol: &str, candidates: &[String]) -> String {
-    let mut out = format!(
-        "# Error: Ambiguous Symbol\n\n`{symbol}` matches multiple declarations in `{file}`.\n\n## Candidates\n\n"
-    );
+    let mut out = format!("\
+# Error: Ambiguous Symbol
+
+`{symbol}` matches multiple declarations in `{file}`.
+
+## Candidates
+
+");
     for c in candidates {
         let _ = writeln!(out, "- `{c}`");
     }
-    out.push('\n');
-    out.push_str("## Fix\n\nUse the qualified dot-path form:\n\n");
+
+    out.push_str("\
+\n## Fix
+
+Use the qualified dot-path form:
+
+");
     if let Some(first) = candidates.first() {
         let _ = writeln!(out, "    docref resolve {file} {first}");
     }

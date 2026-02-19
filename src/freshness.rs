@@ -102,9 +102,22 @@ fn enrich_with_source_locations(e: error::Error, refs: &[Reference]) -> error::E
     };
     let sources = refs.iter()
         .filter(|r| r.symbol.display_name() == symbol)
-        .map(|r| SourceRef { file: r.source.clone(), line: r.source_line })
+        .map(|r| SourceRef {
+            file: r.source.clone(),
+            line: r.source_line,
+            content: read_line_from_file(&r.source, r.source_line),
+        })
         .collect();
     error::Error::SymbolNotFound { file, symbol, suggestions, referenced_from: sources }
+}
+
+/// Read a single line from a file. Returns empty string on any failure.
+fn read_line_from_file(path: &Path, line: u32) -> String {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    let idx = (line as usize).saturating_sub(1);
+    content.lines().nth(idx).unwrap_or("").trim().to_string()
 }
 
 /// Parse a symbol string into bare or dot-scoped form.
