@@ -229,17 +229,24 @@ fn check_text(
 
     let stale_count: u32 = stale_refs.len().try_into().unwrap_or(u32::MAX);
     if broken_count > 0 {
-        println!();
-        println!("{broken_count} broken, {stale_count} stale");
+        eprintln!();
+        eprintln!("{broken_count} broken, {stale_count} stale");
         return Ok(ExitCode::from(2));
     } else if !stale_refs.is_empty() {
-        println!();
-        println!("{stale_count} stale");
+        eprintln!();
+        eprintln!("# Stale References");
+        eprintln!();
+        eprintln!("{stale_count} references have changed since the docs were written:");
+        eprintln!();
+        for r in &stale_refs {
+            eprintln!("- `{r}`");
+        }
+        eprintln!();
         print_update_hints(&stale_refs);
         return Ok(ExitCode::from(1));
     }
     let total = lockfile.entries.len();
-    println!("All {total} references fresh");
+    eprintln!("All {total} references fresh");
     return Ok(ExitCode::SUCCESS);
 }
 
@@ -496,9 +503,20 @@ fn print_fix_report(fixes: &[FixAction], unfixable: &[String]) {
 /// Print recovery hints to stderr showing exact update commands.
 fn print_update_hints(stale_refs: &[String]) {
     eprintln!();
-    eprintln!("hint: run `docref update <ref>` to accept changes:");
+    eprintln!("## Warning");
+    eprintln!();
+    eprintln!("Stale means the source code changed since the docs were written.");
+    eprintln!("Before updating, check the markdown that references each target");
+    eprintln!("to ensure the documentation still accurately describes the code.");
+    eprintln!("Running `docref update` accepts the new code as-is — if the docs");
+    eprintln!("are now wrong, update the markdown first, then run the command.");
+    eprintln!();
+    eprintln!("## Fix");
+    eprintln!();
+    eprintln!("Run `docref update <ref>` to accept changes:");
+    eprintln!();
     for r in stale_refs {
-        eprintln!("  docref update {r}");
+        eprintln!("    docref update {r}");
     }
     return;
 }
