@@ -14,6 +14,7 @@ pub fn language_for_path(path: &Path) -> Result<Language, Error> {
     let ext = path.extension().and_then(|e| return e.to_str()).unwrap_or("");
 
     return match ext {
+        "bash" | "sh" => Ok(tree_sitter_bash::LANGUAGE.into()),
         "go" => Ok(tree_sitter_go::LANGUAGE.into()),
         "js" => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         "jsx" => Ok(tree_sitter_typescript::LANGUAGE_TSX.into()),

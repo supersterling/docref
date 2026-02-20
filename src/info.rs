@@ -218,10 +218,13 @@ fn print_section_how_it_works() {
 Markdown files in your project are the documents docref tracks. Any standard
 markdown link pointing to a source file becomes a tracked reference:
 
-    [descriptive text](path/to/file.rs#symbol_name)
+    [descriptive text](path/to/file.rs#symbol_name)     specific symbol
+    [descriptive text](path/to/file.rs)                  entire file
 
-docref hashes each referenced symbol's source code. When code changes,
-`docref check` detects which references became stale or broken.
+Use #symbol when your docs describe a specific function, type, or variable.
+Use a bare file path (no #) when the reference is about the file as a whole —
+configuration files, scripts, templates, or any file where no specific symbol
+applies. Both forms are tracked; both detect when the referenced code changes.
 
 "
     );
@@ -236,6 +239,7 @@ fn print_section_languages() {
 
 | Extension       | Language   |
 |-----------------|------------|
+| .bash .sh       | Bash       |
 | .go             | Go         |
 | .js .jsx        | JavaScript |
 | .md             | Markdown   |
@@ -286,7 +290,12 @@ fn print_section_reference_syntax() {
     [text](ns:path/to/file.rs#symbol)         namespaced reference
     [text](path/to/file.rs)                   whole-file reference (no #symbol)
 
-Use `docref resolve <file>` to list all addressable symbols in a source file.
+Choose the form that matches what your docs describe:
+
+  - **#symbol** — when documenting a specific function, type, constant, or method.
+    Use `docref resolve <file>` to list addressable symbols.
+  - **bare path** — when no specific symbol applies: config files, scripts,
+    templates, manifests, or when the entire file is the subject.
 
 "
     );
@@ -373,6 +382,10 @@ pub fn run(json: bool) {
 /// Build the list of supported languages for JSON output.
 fn supported_languages() -> Vec<LanguageInfo> {
     return vec![
+        LanguageInfo {
+            extensions: vec![".bash".to_string(), ".sh".to_string()],
+            language: "Bash".to_string(),
+        },
         LanguageInfo { extensions: vec![".go".to_string()], language: "Go".to_string() },
         LanguageInfo {
             extensions: vec![".js".to_string(), ".jsx".to_string()],

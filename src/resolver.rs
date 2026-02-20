@@ -67,6 +67,7 @@ fn collect_class_members(node: Node<'_>, source: &str, declarations: &mut Vec<De
 /// Dispatch to the correct collector based on file extension.
 fn collect_declarations(root: Node<'_>, source: &str, ext: &str) -> Vec<Declaration> {
     return match ext {
+        "bash" | "sh" => collect_bash_declarations(root, source),
         "go" => collect_go_declarations(root, source),
         "js" | "jsx" | "ts" | "tsx" => collect_ts_declarations(root, source),
         "md" | "markdown" => collect_md_declarations(root, source),
@@ -135,6 +136,58 @@ fn collect_enum_variants(node: Node<'_>, source: &str, declarations: &mut Vec<De
             qualified_name: format!("{enum_name}.{variant_name}"),
         });
     }
+}
+
+/// Walk the tree and collect all named Bash declarations (functions and variables).
+fn collect_bash_declarations(root: Node<'_>, source: &str) -> Vec<Declaration> {
+    let mut declarations = Vec::new();
+    let mut cursor = root.walk();
+
+    for node in root.children(&mut cursor) {
+        match node.kind() {
+            "function_definition" => {
+                let Some(name_node) = node.child_by_field_name("name") else {
+                    continue;
+                };
+                let Ok(name) = name_node.utf8_text(source.as_bytes()) else {
+                    continue;
+                };
+                let Some(start) = u32::try_from(node.start_byte()).ok() else {
+                    continue;
+                };
+                let Some(end) = u32::try_from(node.end_byte()).ok() else {
+                    continue;
+                };
+                declarations.push(Declaration {
+                    byte_range: start..end,
+                    name: name.to_string(),
+                    qualified_name: name.to_string(),
+                });
+            },
+            "variable_assignment" => {
+                let Some(name_node) = node.child_by_field_name("name") else {
+                    continue;
+                };
+                let Ok(name) = name_node.utf8_text(source.as_bytes()) else {
+                    continue;
+                };
+                let Some(start) = u32::try_from(node.start_byte()).ok() else {
+                    continue;
+                };
+                let Some(end) = u32::try_from(node.end_byte()).ok() else {
+                    continue;
+                };
+                declarations.push(Declaration {
+                    byte_range: start..end,
+                    name: name.to_string(),
+                    qualified_name: name.to_string(),
+                });
+            },
+            _ => {},
+        }
+    }
+
+    return declarations;
 }
 
 /// Collect const declarations from a Go `const_declaration` node.

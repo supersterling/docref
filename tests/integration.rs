@@ -1286,6 +1286,70 @@ fn go_detects_stale_on_function_change() {
     assert_eq!(code, 1, "expected stale, got {code}\nstdout: {stdout}");
 }
 
+// --- Bash support tests ---
+
+#[test]
+fn bash_init_then_check_passes() {
+    let (_tmp, dir) = isolated_fixture("bash");
+
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let lock = std::fs::read_to_string(dir.join(".docref.lock")).unwrap();
+    assert!(lock.contains("deploy.sh"), "lockfile missing Bash refs: {lock}");
+    assert!(lock.contains("MAX_RETRIES"), "lockfile missing MAX_RETRIES: {lock}");
+    assert!(lock.contains("DEPLOY_DIR"), "lockfile missing DEPLOY_DIR: {lock}");
+    assert!(lock.contains("setup_env"), "lockfile missing setup_env: {lock}");
+    assert!(lock.contains("deploy_app"), "lockfile missing deploy_app: {lock}");
+    assert!(lock.contains("run_tests"), "lockfile missing run_tests: {lock}");
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+#[test]
+fn bash_resolve_lists_symbols() {
+    let (_tmp, dir) = isolated_fixture("bash");
+
+    let output = docref_at(&dir)
+        .args(["resolve", "src/deploy.sh"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MAX_RETRIES"), "missing MAX_RETRIES: {stdout}");
+    assert!(stdout.contains("DEPLOY_DIR"), "missing DEPLOY_DIR: {stdout}");
+    assert!(stdout.contains("setup_env"), "missing setup_env: {stdout}");
+    assert!(stdout.contains("deploy_app"), "missing deploy_app: {stdout}");
+    assert!(stdout.contains("run_tests"), "missing run_tests: {stdout}");
+}
+
+#[test]
+fn bash_detects_stale_on_function_change() {
+    let (_tmp, dir) = isolated_fixture("bash");
+    let src = dir.join("src/deploy.sh");
+
+    let original = std::fs::read_to_string(&src).unwrap();
+    let init = docref_at(&dir).arg("init").output().unwrap();
+    assert!(init.status.success());
+
+    let modified = original.replace("mkdir -p", "mkdir -pv");
+    std::fs::write(&src, &modified).unwrap();
+
+    let check = docref_at(&dir).arg("check").output().unwrap();
+    let code = check.status.code().unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(code, 1, "expected stale, got {code}\nstdout: {stdout}");
+}
+
 // --- Watch tests ---
 
 #[test]
